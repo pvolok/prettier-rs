@@ -57,11 +57,16 @@ impl std::fmt::Display for Indent {
   }
 }
 
+const PRINT_WIDTH: usize = 80;
+
 pub fn print_doc(
   out: &mut DocWriter,
   src_file: &SourceFile,
   doc: &Doc,
 ) -> std::fmt::Result {
+  let mut width = PRINT_WIDTH;
+  let mut pos = 0;
+
   let mut cmds = Vec::<Command>::new();
   let mut line_suffix = Vec::<Command>::new();
 
@@ -98,7 +103,23 @@ pub fn print_doc(
               mode: BreakMode::Flat,
               doc: &contents,
             };
-            cmds.push(next);
+            if !break_
+              && fits(
+                &next,
+                &cmds,
+                width as isize - pos as isize,
+                !line_suffix.is_empty(),
+                (),
+                false,
+              )
+            {
+              cmds.push(next);
+            } else {
+              cmds.push(Command {
+                mode: BreakMode::Break,
+                ..next
+              });
+            }
           }
         };
       }
@@ -158,7 +179,12 @@ pub fn print_doc(
       }
       Doc::Cursor => todo!(),
       Doc::Label(_, _) => todo!(),
-      Doc::Text(text) => out.write_str(text)?,
+      Doc::Text(text) => {
+        out.write_str(text)?;
+        if !cmds.is_empty() {
+          pos += string_width(text);
+        }
+      }
       Doc::Array(items) => {
         for item in items.iter().rev() {
           cmds.push(Command {
@@ -172,4 +198,108 @@ pub fn print_doc(
   }
 
   Ok(())
+}
+
+fn fits(
+  next: &Command,
+  rest_commands: &[Command],
+  mut width: isize,
+  has_line_suffix: bool,
+  group_mode_map: (),
+  must_be_flat: bool,
+) -> bool {
+  if width == isize::MAX {
+    return true;
+  }
+
+  let mut out = String::new();
+  let mut cmds = vec![(next.mode, next.doc)];
+  let mut rest = rest_commands;
+
+  while width >= 0 {
+    let (mode, doc) = if let Some(cmd) = cmds.pop() {
+      cmd
+    } else if let Some(cmd) = rest.take_last() {
+      (cmd.mode, cmd.doc)
+    } else {
+      return true;
+    };
+
+    match doc {
+      Doc::Align(_, _) => todo!(),
+      Doc::Group {
+        id,
+        contents,
+        break_,
+        expanded_states,
+      } => {
+        if must_be_flat && *break_ {
+          return false;
+        }
+        let group_mode = if *break_ { BreakMode::Break } else { mode };
+        // TODO: handle expanded_states
+        // let contents =
+        //    && groupMode === MODE_BREAK
+        //     ? doc.expandedStates.at(-1)
+        //     : doc.contents;
+        // cmds.push({ mode: groupMode, doc: contents });
+        cmds.push((group_mode, contents));
+      }
+      Doc::Fill(_) => todo!(),
+      Doc::IfBreak {
+        break_contents,
+        flat_contents,
+      } => todo!(),
+      Doc::Indent(_) => todo!(),
+      Doc::IndentIfBreak {
+        contents,
+        group_id,
+        negate,
+      } => todo!(),
+      Doc::LineSuffix(_) => todo!(),
+      Doc::LineSuffixBoundary => todo!(),
+      Doc::BreakParent => todo!(),
+      Doc::Trim => todo!(),
+      Doc::Line {
+        hard,
+        soft,
+        literal,
+      } => {
+        if matches!(mode, BreakMode::Break) || *hard {
+          return true;
+        }
+        if !soft {
+          out.push(' ');
+          width -= 1;
+        }
+      }
+      Doc::Cursor => todo!(),
+      Doc::Label(_, _) => todo!(),
+      Doc::Text(s) => {
+        out.push_str(s);
+        width -= string_width(s);
+      }
+      Doc::Array(docs) => {
+        for doc in docs.iter().rev() {
+          cmds.push((mode, doc));
+        }
+      }
+    }
+  }
+
+  false
+}
+
+fn string_width(s: &str) -> isize {
+  s.chars()
+    .map(|c| {
+      if c.is_control() {
+        return 0;
+      }
+      if c == '\t' {
+        return 2;
+      }
+      1
+    })
+    .sum()
 }

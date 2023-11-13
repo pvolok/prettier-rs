@@ -139,3 +139,9 @@ impl Doc {
     ret
   }
 }
+
+impl From<&str> for Doc {
+  fn from(value: &str) -> Self {
+    Doc::Text(value.to_string())
+  }
+}

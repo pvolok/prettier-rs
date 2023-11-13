@@ -1,3 +1,5 @@
+#![feature(slice_take)]
+
 use std::path::PathBuf;
 
 use doc_printer::{print_doc, DocWriter};

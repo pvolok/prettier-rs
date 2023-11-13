@@ -101,7 +101,10 @@ impl DocPrinter {
   }
 
   fn print_expr_stmt(&mut self, expr_stmt: &ExprStmt) -> anyhow::Result<Doc> {
-    self.print_expr(&expr_stmt.expr)
+    Ok(Doc::new_concat(vec![
+      self.print_expr(&expr_stmt.expr)?,
+      ";".into(),
+    ]))
   }
 
   fn print_expr(&mut self, expr: &Expr) -> anyhow::Result<Doc> {
