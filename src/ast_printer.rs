@@ -160,7 +160,7 @@ impl DocPrinter {
     };
 
     let args_len = call_expr.args.len();
-    let args = call_expr
+    let mut args = call_expr
       .args
       .iter()
       .enumerate()
@@ -188,10 +188,13 @@ impl DocPrinter {
       })
       .collect::<anyhow::Result<Vec<Doc>>>()?;
 
+    args.insert(0, Doc::softline());
     let doc = Doc::new_concat(vec![
       callee_doc,
       Doc::new_text("(".to_string()),
-      Doc::new_concat(args),
+      Doc::new_indent(Doc::new_concat(args)),
+      Doc::new_if_break(",".into(), "".into()),
+      Doc::softline(),
       Doc::new_text(")".to_string()),
     ]);
 

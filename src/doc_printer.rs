@@ -125,9 +125,26 @@ pub fn print_doc(
       }
       Doc::Fill(_) => todo!(),
       Doc::IfBreak {
-        break_contents,
-        flat_contents,
-      } => todo!(),
+        break_doc,
+        flat_doc,
+      } => {
+        match mode {
+          BreakMode::Break => {
+            cmds.push(Command {
+              ind: ind.clone(),
+              mode,
+              doc: &break_doc,
+            });
+          }
+          BreakMode::Flat => {
+            cmds.push(Command {
+              ind: ind.clone(),
+              mode,
+              doc: &flat_doc,
+            });
+          }
+        };
+      }
       Doc::Indent(doc) => {
         cmds.push(Command {
           ind: ind.indent(),
@@ -247,10 +264,18 @@ fn fits(
       }
       Doc::Fill(_) => todo!(),
       Doc::IfBreak {
-        break_contents,
-        flat_contents,
-      } => todo!(),
-      Doc::Indent(_) => todo!(),
+        break_doc,
+        flat_doc,
+      } => {
+        let contents = match mode {
+          BreakMode::Break => break_doc,
+          BreakMode::Flat => flat_doc,
+        };
+        cmds.push((mode, contents));
+      }
+      Doc::Indent(doc) => {
+        cmds.push((mode, doc));
+      }
       Doc::IndentIfBreak {
         contents,
         group_id,

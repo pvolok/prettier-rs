@@ -11,8 +11,8 @@ pub enum Doc {
   },
   Fill(Vec<Doc>),
   IfBreak {
-    break_contents: Box<Doc>,
-    flat_contents: Box<Doc>,
+    break_doc: Box<Doc>,
+    flat_doc: Box<Doc>,
   },
   Indent(Box<Doc>),
   IndentIfBreak {
@@ -71,8 +71,8 @@ impl Doc {
 
   pub fn new_if_break(break_contents: Doc, flat_contents: Doc) -> Self {
     Doc::IfBreak {
-      break_contents: Box::new(break_contents),
-      flat_contents: Box::new(flat_contents),
+      break_doc: Box::new(break_contents),
+      flat_doc: Box::new(flat_contents),
     }
   }
 
@@ -109,6 +109,22 @@ impl Doc {
       hard,
       soft,
       literal,
+    }
+  }
+
+  pub fn hardline() -> Self {
+    Doc::Line {
+      hard: false,
+      soft: true,
+      literal: false,
+    }
+  }
+
+  pub fn softline() -> Self {
+    Doc::Line {
+      hard: false,
+      soft: true,
+      literal: false,
     }
   }
 
