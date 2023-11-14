@@ -21,7 +21,7 @@ fn main() {
   let path = PathBuf::from("example.js");
   let src_file = cm.load_file(&path).unwrap();
 
-  let ast = swc_ecma_parser::parse_file_as_module(
+  let program_ast = swc_ecma_parser::parse_file_as_program(
     &src_file,
     swc_ecma_parser::Syntax::Es(es_config),
     swc_ecma_ast::EsVersion::EsNext,
@@ -31,9 +31,9 @@ fn main() {
   .unwrap();
 
   let mut printer = DocPrinter::new(src_file.clone());
-  let doc = printer.print_module(&ast).unwrap();
+  let doc = printer.print_program(&program_ast).unwrap();
 
-  println!("DOC:\n{:?}\n", doc);
+  println!("DOC:\n{:#?}\n", doc);
 
   let mut out_str = String::new();
   let mut out = DocWriter::String(&mut out_str);

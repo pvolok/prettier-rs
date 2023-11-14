@@ -1,8 +1,9 @@
 use std::rc::Rc;
 
-use swc_common::{SourceFile, Spanned};
+use swc_common::{BytePos, SourceFile, Spanned};
 use swc_ecma_ast::{
-  CallExpr, Expr, ExprStmt, Lit, Module, ModuleItem, Program, Stmt,
+  CallExpr, Decl, Expr, ExprStmt, FnDecl, Lit, Module, ModuleItem, Pat,
+  Program, Stmt,
 };
 
 use crate::doc::Doc;
@@ -25,27 +26,27 @@ impl DocPrinter {
     }
   }
 
+  fn is_next_line_empty<T: Spanned>(&self, items: &[T], index: usize) -> bool {
+    let cur = if let Some(cur) = items.get(index) {
+      cur
+    } else {
+      return false;
+    };
+    let next = if let Some(next) = items.get(index + 1) {
+      next
+    } else {
+      return false;
+    };
+    self.have_line_between_spans(cur.span_hi(), next.span_lo())
+  }
+
+  fn have_line_between_spans(&self, cur_hi: BytePos, next_lo: BytePos) -> bool {
+    self.src_file.lookup_line(cur_hi).unwrap_or(0) + 1
+      < self.src_file.lookup_line(next_lo).unwrap_or(0)
+  }
+
   pub fn print_module(&mut self, module: &Module) -> anyhow::Result<Doc> {
     let mut contents = Vec::new();
-
-    let is_next_line_empty = {
-      let src_file = self.src_file.clone();
-      move |items: &[ModuleItem], index: usize| -> bool {
-        let cur = if let Some(cur) = items.get(index) {
-          cur
-        } else {
-          return false;
-        };
-        let next = if let Some(next) = items.get(index + 1) {
-          next
-        } else {
-          return false;
-        };
-
-        src_file.lookup_line(cur.span_hi()).unwrap_or(0) + 1
-          < src_file.lookup_line(next.span_lo()).unwrap_or(0)
-      }
-    };
 
     let body_len = module.body.len();
     for (i, module_item) in module.body.iter().enumerate() {
@@ -55,7 +56,7 @@ impl DocPrinter {
       if i != body_len - 1 {
         contents.push(Doc::new_line(true, false, false));
 
-        if is_next_line_empty(&module.body, i) {
+        if self.is_next_line_empty(&module.body, i) {
           contents.push(Doc::new_line(true, false, false));
         }
       }
@@ -95,9 +96,77 @@ impl DocPrinter {
       Stmt::For(_) => todo!(),
       Stmt::ForIn(_) => todo!(),
       Stmt::ForOf(_) => todo!(),
-      Stmt::Decl(_) => todo!(),
+      Stmt::Decl(decl) => self.print_decl(decl),
       Stmt::Expr(expr_stmt) => self.print_expr_stmt(expr_stmt),
     }
+  }
+
+  fn print_decl(&mut self, decl: &Decl) -> anyhow::Result<Doc> {
+    match decl {
+      Decl::Class(_) => todo!(),
+      Decl::Fn(fn_decl) => self.print_fn_decl(fn_decl),
+      Decl::Var(_) => todo!(),
+      Decl::Using(_) => todo!(),
+      Decl::TsInterface(_) => todo!(),
+      Decl::TsTypeAlias(_) => todo!(),
+      Decl::TsEnum(_) => todo!(),
+      Decl::TsModule(_) => todo!(),
+    }
+  }
+
+  fn print_fn_decl(&mut self, fn_decl: &FnDecl) -> anyhow::Result<Doc> {
+    let mut print_params = |fn_decl: &FnDecl| -> anyhow::Result<Doc> {
+      let params = &fn_decl.function.params;
+      if params.is_empty() {
+        return Ok(Doc::new_concat(vec!["(".into(), ")".into()]));
+      }
+
+      let mut printed = Vec::new();
+      let params_len = params.len();
+      for (i, param) in params.iter().enumerate() {
+        let is_last = i == params_len - 1;
+        printed.push(self.print_pat(&param.pat)?);
+        if !is_last {
+          printed.push(",".into());
+          printed.push(Doc::line());
+        }
+      }
+
+      Ok(Doc::new_concat(vec![
+        "(".into(),
+        Doc::new_indent(Doc::new_concat(
+          [&[Doc::softline()], printed.as_slice()].concat(),
+        )),
+        Doc::softline(),
+        ")".into(),
+      ]))
+    };
+
+    let doc = Doc::new_concat(vec![
+      "function ".into(),
+      fn_decl.ident.sym.as_str().into(),
+      Doc::new_group(print_params(fn_decl)?, false, None, None),
+    ]);
+
+    Ok(doc)
+  }
+
+  fn print_pat(&mut self, pat: &Pat) -> anyhow::Result<Doc> {
+    let doc = match pat {
+      Pat::Ident(ident) => {
+        let mut parts = Vec::new();
+        parts.push(ident.id.sym.as_str().into());
+        Doc::new_concat(parts)
+      }
+      Pat::Array(_) => todo!(),
+      Pat::Rest(_) => todo!(),
+      Pat::Object(_) => todo!(),
+      Pat::Assign(_) => todo!(),
+      Pat::Invalid(_) => todo!(),
+      Pat::Expr(_) => todo!(),
+    };
+
+    Ok(doc)
   }
 
   fn print_expr_stmt(&mut self, expr_stmt: &ExprStmt) -> anyhow::Result<Doc> {
@@ -159,28 +228,60 @@ impl DocPrinter {
       swc_ecma_ast::Callee::Expr(expr) => self.print_expr(expr)?,
     };
 
+    let args = self.print_call_expr_args(call_expr)?;
+
+    let doc = Doc::new_concat(vec![callee_doc, args]);
+
+    Ok(doc)
+  }
+
+  fn print_call_expr_args(
+    &mut self,
+    call_expr: &CallExpr,
+  ) -> anyhow::Result<Doc> {
+    let mut any_arg_empty_line = false;
     let args_len = call_expr.args.len();
-    let mut args = call_expr
+
+    let all_args_broken_out = |args: Vec<Doc>| -> Doc {
+      Doc::new_group(
+        Doc::new_concat(vec![
+          "(".into(),
+          Doc::new_indent(Doc::new_concat(
+            [Doc::line()].into_iter().chain(args).collect(),
+          )),
+          ",".into(),
+          Doc::line(),
+          ")".into(),
+        ]),
+        true,
+        None,
+        None,
+      )
+    };
+
+    let args = call_expr
       .args
       .iter()
       .enumerate()
       .map(|(i, expr_or_spread)| {
+        let is_last = i == args_len - 1;
         let expr_doc = self.print_expr(&expr_or_spread.expr)?;
         let doc = if expr_or_spread.spread.is_some() {
           Doc::new_concat(vec![Doc::new_text("...".to_string()), expr_doc])
         } else {
           expr_doc
         };
-        let doc = if i != args_len - 1 {
-          Doc::Array(vec![
-            doc,
-            Doc::Text(",".to_string()),
-            Doc::Line {
-              hard: false,
-              soft: false,
-              literal: false,
-            },
-          ])
+        let doc = if !is_last {
+          let mut parts = vec![doc, ",".into()];
+
+          if self.is_next_line_empty(&call_expr.args, i) {
+            any_arg_empty_line = true;
+            parts.push(Doc::hardline());
+            parts.push(Doc::hardline());
+          } else {
+            parts.push(Doc::line());
+          }
+          Doc::Array(parts)
         } else {
           doc
         };
@@ -188,17 +289,25 @@ impl DocPrinter {
       })
       .collect::<anyhow::Result<Vec<Doc>>>()?;
 
-    args.insert(0, Doc::softline());
-    let doc = Doc::new_concat(vec![
-      callee_doc,
-      Doc::new_text("(".to_string()),
-      Doc::new_indent(Doc::new_concat(args)),
-      Doc::new_if_break(",".into(), "".into()),
-      Doc::softline(),
-      Doc::new_text(")".to_string()),
-    ]);
+    if any_arg_empty_line {
+      return Ok(all_args_broken_out(args));
+    }
 
-    let doc = Doc::new_group(Box::new(doc), false, None, None);
+    let doc = Doc::new_group(
+      Doc::new_concat(vec![
+        "(".into(),
+        Doc::new_indent(Doc::new_concat(
+          [Doc::softline()].into_iter().chain(args).collect(),
+        )),
+        Doc::new_if_break(",".into(), "".into()),
+        Doc::softline(),
+        ")".into(),
+      ])
+      .into(),
+      false,
+      None,
+      None,
+    );
 
     Ok(doc)
   }

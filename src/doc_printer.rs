@@ -16,6 +16,18 @@ impl<'a> Write for DocWriter<'a> {
   }
 }
 
+impl DocWriter<'_> {
+  fn trim(&mut self) -> usize {
+    match self {
+      DocWriter::String(s) => {
+        let len = s.trim_end_matches("\t ").len();
+        s.truncate(s.len() - len);
+        len
+      }
+    }
+  }
+}
+
 struct Command<'a> {
   ind: Indent,
   mode: BreakMode,
@@ -40,6 +52,21 @@ impl Indent {
   fn indent(&self) -> Indent {
     Indent(Some(Rc::new((IndentPart::Indent, self.clone()))))
   }
+
+  fn width(&self) -> i32 {
+    let mut ind = self;
+    let mut width = 0;
+    while let Some(level) = &ind.0 {
+      let (part, parent) = level.as_ref();
+      match part {
+        IndentPart::Indent => {
+          width += 2;
+        }
+      }
+      ind = parent;
+    }
+    width
+  }
 }
 
 impl std::fmt::Display for Indent {
@@ -57,7 +84,7 @@ impl std::fmt::Display for Indent {
   }
 }
 
-const PRINT_WIDTH: usize = 80;
+const PRINT_WIDTH: i32 = 80;
 
 pub fn print_doc(
   out: &mut DocWriter,
@@ -65,7 +92,7 @@ pub fn print_doc(
   doc: &Doc,
 ) -> std::fmt::Result {
   let mut width = PRINT_WIDTH;
-  let mut pos = 0;
+  let mut pos: i32 = 0;
 
   let mut cmds = Vec::<Command>::new();
   let mut line_suffix = Vec::<Command>::new();
@@ -107,7 +134,7 @@ pub fn print_doc(
               && fits(
                 &next,
                 &cmds,
-                width as isize - pos as isize,
+                width - pos,
                 !line_suffix.is_empty(),
                 (),
                 false,
@@ -159,7 +186,7 @@ pub fn print_doc(
       } => todo!(),
       Doc::LineSuffix(_) => todo!(),
       Doc::LineSuffixBoundary => todo!(),
-      Doc::BreakParent => todo!(),
+      Doc::BreakParent => (),
       Doc::Trim => todo!(),
       Doc::Line {
         hard,
@@ -170,6 +197,7 @@ pub fn print_doc(
           BreakMode::Flat if !hard => {
             if !soft {
               out.write_char(' ')?;
+              pos += 1;
             }
           }
           _ => {
@@ -190,6 +218,7 @@ pub fn print_doc(
               todo!();
             } else {
               write!(out, "\n{}", ind)?;
+              pos = ind.width();
             }
           }
         };
@@ -220,12 +249,12 @@ pub fn print_doc(
 fn fits(
   next: &Command,
   rest_commands: &[Command],
-  mut width: isize,
+  mut width: i32,
   has_line_suffix: bool,
   group_mode_map: (),
   must_be_flat: bool,
 ) -> bool {
-  if width == isize::MAX {
+  if width == i32::MAX {
     return true;
   }
 
@@ -315,7 +344,7 @@ fn fits(
   false
 }
 
-fn string_width(s: &str) -> isize {
+fn string_width(s: &str) -> i32 {
   s.chars()
     .map(|c| {
       if c.is_control() {

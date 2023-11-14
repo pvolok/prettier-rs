@@ -52,13 +52,13 @@ impl Doc {
   }
 
   pub fn new_group(
-    contents: Box<Doc>,
+    contents: Doc,
     break_: bool,
     expanded_states: Option<Vec<Doc>>,
     id: Option<usize>,
   ) -> Self {
     Doc::Group {
-      contents,
+      contents: Box::new(contents),
       break_,
       expanded_states,
       id,
@@ -112,12 +112,23 @@ impl Doc {
     }
   }
 
-  pub fn hardline() -> Self {
+  pub fn line() -> Self {
     Doc::Line {
       hard: false,
-      soft: true,
+      soft: false,
       literal: false,
     }
+  }
+
+  pub fn hardline() -> Self {
+    Doc::Array(vec![
+      Doc::Line {
+        hard: true,
+        soft: false,
+        literal: false,
+      },
+      Doc::BreakParent,
+    ])
   }
 
   pub fn softline() -> Self {
