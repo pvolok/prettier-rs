@@ -3,8 +3,9 @@ use std::rc::Rc;
 use swc_common::{BytePos, SourceFile, Spanned};
 use swc_ecma_ast::{
   ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, FnDecl,
-  Ident, Lit, MemberExpr, MemberProp, Module, ModuleItem, Pat, Program, Stmt,
-  TsThisTypeOrIdent, VarDecl, VarDeclKind, VarDeclarator,
+  Ident, Lit, MemberExpr, MemberProp, Module, ModuleItem, ObjectLit, Pat,
+  Program, Prop, PropName, PropOrSpread, Stmt, TsThisTypeOrIdent, VarDecl,
+  VarDeclKind, VarDeclarator,
 };
 
 use crate::doc::{Doc, GroupId};
@@ -306,7 +307,7 @@ impl DocPrinter {
     let doc = match expr {
       Expr::This(_) => todo!(),
       Expr::Array(array_lit) => self.print_array_lit(array_lit)?,
-      Expr::Object(_) => todo!(),
+      Expr::Object(object_lit) => self.print_object_lit(object_lit)?,
       Expr::Fn(_) => todo!(),
       Expr::Unary(_) => todo!(),
       Expr::Update(_) => todo!(),
@@ -425,6 +426,82 @@ impl DocPrinter {
         None,
       ))
     }
+
+    Ok(Doc::new_concat(parts))
+  }
+
+  fn print_object_lit(
+    &mut self,
+    object_lit: &ObjectLit,
+  ) -> anyhow::Result<Doc> {
+    let separator = Doc::from(",");
+
+    let mut is_prev_line_empty = false;
+
+    let props = object_lit
+      .props
+      .iter()
+      .enumerate()
+      .map(|(i, prop)| {
+        let prop_doc = match prop {
+          PropOrSpread::Spread(_) => todo!(),
+          PropOrSpread::Prop(prop) => match prop.as_ref() {
+            Prop::Shorthand(ident) => ident.sym.as_str().into(),
+            Prop::KeyValue(key_value_prop) => {
+              let key: Doc = match &key_value_prop.key {
+                PropName::Ident(ident) => ident.sym.as_str().into(),
+                PropName::Str(_) => todo!(),
+                PropName::Num(_) => todo!(),
+                PropName::Computed(_) => todo!(),
+                PropName::BigInt(_) => todo!(),
+              };
+              let value = self.print_expr(&key_value_prop.value)?;
+
+              let group_id = self.group_id("assigment");
+              Doc::new_group(
+                Doc::new_concat(vec![
+                  key,
+                  ":".into(),
+                  Doc::new_group(Doc::line(), false, None, Some(group_id)),
+                  Doc::new_indent_if_break(value, Some(group_id), false),
+                ]),
+                false,
+                None,
+                None,
+              )
+            }
+            Prop::Assign(_) => todo!(),
+            Prop::Getter(_) => todo!(),
+            Prop::Setter(_) => todo!(),
+            Prop::Method(_) => todo!(),
+          },
+        };
+
+        let mut prop_parts = Vec::new();
+        if i > 0 {
+          prop_parts.push(separator.clone());
+          prop_parts.push(Doc::line());
+          if is_prev_line_empty {
+            prop_parts.push(Doc::hardline());
+          }
+        }
+        prop_parts.push(Doc::new_group(prop_doc, false, None, None));
+
+        is_prev_line_empty = self.is_next_line_empty(&object_lit.props, i);
+
+        Ok(Doc::new_concat(prop_parts))
+      })
+      .collect::<anyhow::Result<Vec<Doc>>>()?;
+
+    let parts = vec![
+      "{".into(),
+      Doc::new_indent(Doc::new_concat(
+        [Doc::line()].into_iter().chain(props).collect(),
+      )),
+      Doc::new_if_break(",".into(), "".into(), None),
+      Doc::line(),
+      "}".into(),
+    ];
 
     Ok(Doc::new_concat(parts))
   }
