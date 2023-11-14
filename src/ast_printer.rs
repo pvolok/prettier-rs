@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use swc_common::{BytePos, SourceFile, Spanned};
 use swc_ecma_ast::{
-  CallExpr, Decl, Expr, ExprStmt, FnDecl, Lit, Module, ModuleItem, Pat,
-  Program, Stmt,
+  BlockStmt, CallExpr, Decl, Expr, ExprStmt, FnDecl, Lit, Module, ModuleItem,
+  Pat, Program, Stmt,
 };
 
 use crate::doc::Doc;
@@ -142,13 +142,50 @@ impl DocPrinter {
       ]))
     };
 
-    let doc = Doc::new_concat(vec![
-      "function ".into(),
-      fn_decl.ident.sym.as_str().into(),
-      Doc::new_group(print_params(fn_decl)?, false, None, None),
-    ]);
+    let mut parts = vec!["function ".into(), fn_decl.ident.sym.as_str().into()];
+
+    parts.push(Doc::new_group(print_params(fn_decl)?, false, None, None));
+
+    if let Some(body) = &fn_decl.function.body {
+      parts.push(" ".into());
+      parts.push(self.print_block_stmt(body)?);
+    }
+
+    let doc = Doc::new_concat(parts);
 
     Ok(doc)
+  }
+
+  fn print_block_stmt(
+    &mut self,
+    block_stmt: &BlockStmt,
+  ) -> anyhow::Result<Doc> {
+    let mut parts = Vec::new();
+
+    parts.push("{".into());
+
+    let mut body_parts = Vec::new();
+    for (i, stmt) in block_stmt.stmts.iter().enumerate() {
+      let is_last = i == block_stmt.stmts.len() - 1;
+
+      body_parts.push(self.print_stmt(stmt)?);
+      if !is_last {
+        body_parts.push(Doc::hardline());
+        if self.is_next_line_empty(&block_stmt.stmts, i) {
+          body_parts.push(Doc::hardline());
+        }
+      }
+    }
+    if !body_parts.is_empty() {
+      parts.push(Doc::new_indent(Doc::new_concat(
+        [Doc::hardline()].into_iter().chain(body_parts).collect(),
+      )));
+      parts.push(Doc::hardline());
+    }
+
+    parts.push("}".into());
+
+    Ok(Doc::new_concat(parts))
   }
 
   fn print_pat(&mut self, pat: &Pat) -> anyhow::Result<Doc> {
