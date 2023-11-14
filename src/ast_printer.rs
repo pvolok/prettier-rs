@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use swc_common::{BytePos, SourceFile, Spanned};
 use swc_ecma_ast::{
-  BlockStmt, CallExpr, Decl, Expr, ExprStmt, FnDecl, Lit, Module, ModuleItem,
-  Pat, Program, Stmt,
+  ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, FnDecl,
+  Lit, Module, ModuleItem, Pat, Program, Stmt,
 };
 
 use crate::doc::Doc;
@@ -215,47 +215,129 @@ impl DocPrinter {
 
   fn print_expr(&mut self, expr: &Expr) -> anyhow::Result<Doc> {
     let doc = match expr {
-      swc_ecma_ast::Expr::This(_) => todo!(),
-      swc_ecma_ast::Expr::Array(_) => todo!(),
-      swc_ecma_ast::Expr::Object(_) => todo!(),
-      swc_ecma_ast::Expr::Fn(_) => todo!(),
-      swc_ecma_ast::Expr::Unary(_) => todo!(),
-      swc_ecma_ast::Expr::Update(_) => todo!(),
-      swc_ecma_ast::Expr::Bin(_) => todo!(),
-      swc_ecma_ast::Expr::Assign(_) => todo!(),
-      swc_ecma_ast::Expr::Member(_) => todo!(),
-      swc_ecma_ast::Expr::SuperProp(_) => todo!(),
-      swc_ecma_ast::Expr::Cond(_) => todo!(),
-      swc_ecma_ast::Expr::Call(call_expr) => self.print_call_expr(call_expr)?,
-      swc_ecma_ast::Expr::New(_) => todo!(),
-      swc_ecma_ast::Expr::Seq(_) => todo!(),
-      swc_ecma_ast::Expr::Ident(ident) => Doc::new_text(ident.sym.to_string()),
-      swc_ecma_ast::Expr::Lit(lit) => self.print_lit(lit)?,
-      swc_ecma_ast::Expr::Tpl(_) => todo!(),
-      swc_ecma_ast::Expr::TaggedTpl(_) => todo!(),
-      swc_ecma_ast::Expr::Arrow(_) => todo!(),
-      swc_ecma_ast::Expr::Class(_) => todo!(),
-      swc_ecma_ast::Expr::Yield(_) => todo!(),
-      swc_ecma_ast::Expr::MetaProp(_) => todo!(),
-      swc_ecma_ast::Expr::Await(_) => todo!(),
-      swc_ecma_ast::Expr::Paren(_) => todo!(),
-      swc_ecma_ast::Expr::JSXMember(_) => todo!(),
-      swc_ecma_ast::Expr::JSXNamespacedName(_) => todo!(),
-      swc_ecma_ast::Expr::JSXEmpty(_) => todo!(),
-      swc_ecma_ast::Expr::JSXElement(_) => todo!(),
-      swc_ecma_ast::Expr::JSXFragment(_) => todo!(),
-      swc_ecma_ast::Expr::TsTypeAssertion(_) => todo!(),
-      swc_ecma_ast::Expr::TsConstAssertion(_) => todo!(),
-      swc_ecma_ast::Expr::TsNonNull(_) => todo!(),
-      swc_ecma_ast::Expr::TsAs(_) => todo!(),
-      swc_ecma_ast::Expr::TsInstantiation(_) => todo!(),
-      swc_ecma_ast::Expr::TsSatisfies(_) => todo!(),
-      swc_ecma_ast::Expr::PrivateName(_) => todo!(),
-      swc_ecma_ast::Expr::OptChain(_) => todo!(),
-      swc_ecma_ast::Expr::Invalid(_) => todo!(),
+      Expr::This(_) => todo!(),
+      Expr::Array(array_lit) => self.print_array_lit(array_lit)?,
+      Expr::Object(_) => todo!(),
+      Expr::Fn(_) => todo!(),
+      Expr::Unary(_) => todo!(),
+      Expr::Update(_) => todo!(),
+      Expr::Bin(_) => todo!(),
+      Expr::Assign(_) => todo!(),
+      Expr::Member(_) => todo!(),
+      Expr::SuperProp(_) => todo!(),
+      Expr::Cond(_) => todo!(),
+      Expr::Call(call_expr) => self.print_call_expr(call_expr)?,
+      Expr::New(_) => todo!(),
+      Expr::Seq(_) => todo!(),
+      Expr::Ident(ident) => Doc::new_text(ident.sym.to_string()),
+      Expr::Lit(lit) => self.print_lit(lit)?,
+      Expr::Tpl(_) => todo!(),
+      Expr::TaggedTpl(_) => todo!(),
+      Expr::Arrow(_) => todo!(),
+      Expr::Class(_) => todo!(),
+      Expr::Yield(_) => todo!(),
+      Expr::MetaProp(_) => todo!(),
+      Expr::Await(_) => todo!(),
+      Expr::Paren(_) => todo!(),
+      Expr::JSXMember(_) => todo!(),
+      Expr::JSXNamespacedName(_) => todo!(),
+      Expr::JSXEmpty(_) => todo!(),
+      Expr::JSXElement(_) => todo!(),
+      Expr::JSXFragment(_) => todo!(),
+      Expr::TsTypeAssertion(_) => todo!(),
+      Expr::TsConstAssertion(_) => todo!(),
+      Expr::TsNonNull(_) => todo!(),
+      Expr::TsAs(_) => todo!(),
+      Expr::TsInstantiation(_) => todo!(),
+      Expr::TsSatisfies(_) => todo!(),
+      Expr::PrivateName(_) => todo!(),
+      Expr::OptChain(_) => todo!(),
+      Expr::Invalid(_) => todo!(),
     };
 
     Ok(doc)
+  }
+
+  fn print_array_lit(&mut self, array_lit: &ArrayLit) -> anyhow::Result<Doc> {
+    let mut parts = Vec::new();
+
+    let open_bracket = "[";
+    let close_bracket = "]";
+
+    if array_lit.elems.is_empty() {
+      parts.push(open_bracket.into());
+      parts.push(close_bracket.into());
+    } else {
+      // We can unwrap because array is not empty.
+      let last_elem = array_lit.elems.last().unwrap();
+      let can_have_trailing_comma =
+        last_elem.as_ref().map_or(true, |el| el.spread.is_none());
+
+      // JavaScript allows you to have empty elements in an array which
+      // changes its length based on the number of commas. The algorithm
+      // is that if the last argument is null, we need to force insert
+      // a comma to ensure JavaScript recognizes it.
+      //   [,].length === 1
+      //   [1,].length === 1
+      //   [1,,].length === 2
+      let needs_forced_trailing_comma = last_elem.is_none();
+
+      // TODO
+      let should_break = false;
+
+      let trailing_comma = if !can_have_trailing_comma {
+        "".into()
+      } else if needs_forced_trailing_comma {
+        ",".into()
+      } else {
+        Doc::new_if_break(",".into(), "".into())
+      };
+
+      let mut elems_parts = Vec::new();
+      for (i, elem) in array_lit.elems.iter().enumerate() {
+        let is_last = i == array_lit.elems.len() - 1;
+
+        let mut elem_parts = Vec::new();
+        if let Some(elem) = elem {
+          if elem.spread.is_some() {
+            elem_parts.push("...".into());
+          }
+          elem_parts.push(self.print_expr(&elem.expr)?);
+        }
+        elems_parts.push(Doc::new_group(
+          Doc::new_concat(elem_parts),
+          false,
+          None,
+          None,
+        ));
+
+        if !is_last {
+          elems_parts.push(",".into());
+          elems_parts.push(Doc::line());
+          if self.is_next_line_empty(&array_lit.elems, i) {
+            elems_parts.push(Doc::softline());
+          }
+        }
+      }
+
+      parts.push(Doc::new_group(
+        Doc::new_concat(vec![
+          open_bracket.into(),
+          Doc::new_indent(Doc::new_concat(vec![
+            Doc::softline(),
+            Doc::new_concat(elems_parts),
+            trailing_comma.into(),
+          ])),
+          Doc::softline(),
+          close_bracket.into(),
+        ]),
+        should_break,
+        None,
+        None,
+      ))
+    }
+
+    Ok(Doc::new_concat(parts))
   }
 
   fn print_call_expr(&mut self, call_expr: &CallExpr) -> anyhow::Result<Doc> {
