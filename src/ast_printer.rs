@@ -3,8 +3,8 @@ use std::rc::Rc;
 use swc_common::{BytePos, SourceFile, Spanned};
 use swc_ecma_ast::{
   ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, FnDecl,
-  Lit, Module, ModuleItem, Pat, Program, Stmt, VarDecl, VarDeclKind,
-  VarDeclarator,
+  Ident, Lit, MemberExpr, MemberProp, Module, ModuleItem, Pat, Program, Stmt,
+  TsThisTypeOrIdent, VarDecl, VarDeclKind, VarDeclarator,
 };
 
 use crate::doc::{Doc, GroupId};
@@ -312,7 +312,7 @@ impl DocPrinter {
       Expr::Update(_) => todo!(),
       Expr::Bin(_) => todo!(),
       Expr::Assign(_) => todo!(),
-      Expr::Member(_) => todo!(),
+      Expr::Member(member_expr) => self.print_member_expr(member_expr)?,
       Expr::SuperProp(_) => todo!(),
       Expr::Cond(_) => todo!(),
       Expr::Call(call_expr) => self.print_call_expr(call_expr)?,
@@ -427,6 +427,40 @@ impl DocPrinter {
     }
 
     Ok(Doc::new_concat(parts))
+  }
+
+  fn print_member_expr(
+    &mut self,
+    member_expr: &MemberExpr,
+  ) -> anyhow::Result<Doc> {
+    let obj = self.print_expr(&member_expr.obj)?;
+    let lookup = match &member_expr.prop {
+      MemberProp::Ident(ident) => {
+        Doc::new_concat(vec![".".into(), ident.sym.as_str().into()])
+      }
+      MemberProp::PrivateName(_) => todo!(),
+      MemberProp::Computed(prop) => {
+        let prop_doc = self.print_expr(&prop.expr)?;
+        match prop.expr.as_ref() {
+          Expr::Lit(Lit::Num(_)) => {
+            Doc::new_concat(vec!["[".into(), prop_doc, "]".into()])
+          }
+          _ => Doc::new_group(
+            Doc::new_concat(vec![
+              "[".into(),
+              Doc::new_indent(Doc::new_concat(vec![Doc::softline(), prop_doc])),
+              Doc::softline(),
+              "]".into(),
+            ]),
+            false,
+            None,
+            None,
+          ),
+        }
+      }
+    };
+
+    Ok(Doc::new_concat(vec![obj, lookup]))
   }
 
   fn print_call_expr(&mut self, call_expr: &CallExpr) -> anyhow::Result<Doc> {
