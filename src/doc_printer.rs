@@ -1,8 +1,8 @@
-use std::{fmt::Write, rc::Rc};
+use std::{borrow::Cow, collections::HashMap, fmt::Write, rc::Rc};
 
 use swc_common::SourceFile;
 
-use crate::doc::Doc;
+use crate::doc::{Doc, GroupId};
 
 pub enum DocWriter<'a> {
   String(&'a mut String),
@@ -28,10 +28,10 @@ impl DocWriter<'_> {
   }
 }
 
-struct Command<'a> {
+struct Command {
   ind: Indent,
   mode: BreakMode,
-  doc: &'a Doc,
+  doc: Doc,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -91,6 +91,8 @@ pub fn print_doc(
   src_file: &SourceFile,
   doc: &Doc,
 ) -> std::fmt::Result {
+  let mut group_mode_map = HashMap::<GroupId, BreakMode>::new();
+
   let mut width = PRINT_WIDTH;
   let mut pos: i32 = 0;
 
@@ -100,7 +102,7 @@ pub fn print_doc(
   cmds.push(Command {
     ind: Indent(None),
     mode: BreakMode::Break,
-    doc,
+    doc: doc.clone(),
   });
 
   let mut should_remeasure = false;
@@ -119,7 +121,7 @@ pub fn print_doc(
             cmds.push(Command {
               ind: ind.clone(),
               mode,
-              doc: contents,
+              doc: contents.as_ref().clone(),
             });
           }
           _ => {
@@ -128,7 +130,7 @@ pub fn print_doc(
             let next = Command {
               ind: ind.clone(),
               mode: BreakMode::Flat,
-              doc: &contents,
+              doc: contents.as_ref().clone(),
             };
             if !break_
               && fits(
@@ -136,7 +138,7 @@ pub fn print_doc(
                 &cmds,
                 width - pos,
                 !line_suffix.is_empty(),
-                (),
+                &mut group_mode_map,
                 false,
               )
             {
@@ -149,25 +151,32 @@ pub fn print_doc(
             }
           }
         };
+
+        if let Some(last_cmd) = cmds.last() {
+          if let Some(group_id) = id {
+            group_mode_map.insert(group_id.clone(), last_cmd.mode);
+          }
+        }
       }
       Doc::Fill(_) => todo!(),
       Doc::IfBreak {
         break_doc,
         flat_doc,
+        group_id,
       } => {
         match mode {
           BreakMode::Break => {
             cmds.push(Command {
               ind: ind.clone(),
               mode,
-              doc: &break_doc,
+              doc: break_doc.as_ref().clone(),
             });
           }
           BreakMode::Flat => {
             cmds.push(Command {
               ind: ind.clone(),
               mode,
-              doc: &flat_doc,
+              doc: flat_doc.as_ref().clone(),
             });
           }
         };
@@ -176,14 +185,39 @@ pub fn print_doc(
         cmds.push(Command {
           ind: ind.indent(),
           mode,
-          doc,
+          doc: doc.as_ref().clone(),
         });
       }
       Doc::IndentIfBreak {
         contents,
         group_id,
         negate,
-      } => todo!(),
+      } => {
+        let group_mode = group_id
+          .map(|id| group_mode_map.get(&id).unwrap())
+          .unwrap_or(&mode);
+        let contents = match group_mode {
+          BreakMode::Break => {
+            if negate {
+              contents.as_ref().clone()
+            } else {
+              Doc::new_indent(contents.as_ref().clone())
+            }
+          }
+          BreakMode::Flat => {
+            if negate {
+              Doc::new_indent(contents.as_ref().clone())
+            } else {
+              contents.as_ref().clone()
+            }
+          }
+        };
+        cmds.push(Command {
+          ind: ind.clone(),
+          mode,
+          doc: contents,
+        })
+      }
       Doc::LineSuffix(_) => todo!(),
       Doc::LineSuffixBoundary => todo!(),
       Doc::BreakParent => (),
@@ -214,7 +248,7 @@ pub fn print_doc(
               while let Some(cmd) = line_suffix.pop() {
                 cmds.push(cmd);
               }
-            } else if *literal {
+            } else if literal {
               todo!();
             } else {
               write!(out, "\n{}", ind)?;
@@ -226,9 +260,9 @@ pub fn print_doc(
       Doc::Cursor => todo!(),
       Doc::Label(_, _) => todo!(),
       Doc::Text(text) => {
-        out.write_str(text)?;
+        out.write_str(&text)?;
         if !cmds.is_empty() {
-          pos += string_width(text);
+          pos += string_width(&text);
         }
       }
       Doc::Array(items) => {
@@ -236,7 +270,7 @@ pub fn print_doc(
           cmds.push(Command {
             ind: ind.clone(),
             mode,
-            doc: item,
+            doc: item.clone(),
           });
         }
       }
@@ -251,7 +285,7 @@ fn fits(
   rest_commands: &[Command],
   mut width: i32,
   has_line_suffix: bool,
-  group_mode_map: (),
+  group_mode_map: &mut HashMap<GroupId, BreakMode>,
   must_be_flat: bool,
 ) -> bool {
   if width == i32::MAX {
@@ -259,14 +293,15 @@ fn fits(
   }
 
   let mut out = String::new();
-  let mut cmds = vec![(next.mode, next.doc)];
+
+  let mut cmds: Vec<(BreakMode, Doc)> = vec![(next.mode, next.doc.clone())];
   let mut rest = rest_commands;
 
   while width >= 0 {
     let (mode, doc) = if let Some(cmd) = cmds.pop() {
       cmd
     } else if let Some(cmd) = rest.take_last() {
-      (cmd.mode, cmd.doc)
+      (cmd.mode, cmd.doc.clone())
     } else {
       return true;
     };
@@ -279,37 +314,43 @@ fn fits(
         break_,
         expanded_states,
       } => {
-        if must_be_flat && *break_ {
+        if must_be_flat && break_ {
           return false;
         }
-        let group_mode = if *break_ { BreakMode::Break } else { mode };
+        let group_mode = if break_ { BreakMode::Break } else { mode };
         // TODO: handle expanded_states
         // let contents =
         //    && groupMode === MODE_BREAK
         //     ? doc.expandedStates.at(-1)
         //     : doc.contents;
         // cmds.push({ mode: groupMode, doc: contents });
-        cmds.push((group_mode, contents));
+        cmds.push((group_mode, contents.as_ref().clone()));
       }
       Doc::Fill(_) => todo!(),
       Doc::IfBreak {
         break_doc,
         flat_doc,
+        group_id,
       } => {
-        let contents = match mode {
+        let group_mode = if let Some(group_id) = group_id {
+          *group_mode_map.get(&group_id).unwrap_or(&BreakMode::Flat)
+        } else {
+          mode
+        };
+        let contents = match group_mode {
           BreakMode::Break => break_doc,
           BreakMode::Flat => flat_doc,
         };
-        cmds.push((mode, contents));
+        cmds.push((mode, contents.as_ref().clone()));
       }
       Doc::Indent(doc) => {
-        cmds.push((mode, doc));
+        cmds.push((mode, doc.as_ref().clone()));
       }
       Doc::IndentIfBreak {
         contents,
         group_id,
         negate,
-      } => todo!(),
+      } => cmds.push((mode, contents.as_ref().clone())),
       Doc::LineSuffix(_) => todo!(),
       Doc::LineSuffixBoundary => todo!(),
       Doc::BreakParent => todo!(),
@@ -319,7 +360,7 @@ fn fits(
         soft,
         literal,
       } => {
-        if matches!(mode, BreakMode::Break) || *hard {
+        if matches!(mode, BreakMode::Break) || hard {
           return true;
         }
         if !soft {
@@ -330,12 +371,12 @@ fn fits(
       Doc::Cursor => todo!(),
       Doc::Label(_, _) => todo!(),
       Doc::Text(s) => {
-        out.push_str(s);
-        width -= string_width(s);
+        out.push_str(&s);
+        width -= string_width(&s);
       }
       Doc::Array(docs) => {
         for doc in docs.iter().rev() {
-          cmds.push((mode, doc));
+          cmds.push((mode, doc.clone()));
         }
       }
     }

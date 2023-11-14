@@ -3,18 +3,23 @@ use std::rc::Rc;
 use swc_common::{BytePos, SourceFile, Spanned};
 use swc_ecma_ast::{
   ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, FnDecl,
-  Lit, Module, ModuleItem, Pat, Program, Stmt,
+  Lit, Module, ModuleItem, Pat, Program, Stmt, VarDecl, VarDeclKind,
+  VarDeclarator,
 };
 
-use crate::doc::Doc;
+use crate::doc::{Doc, GroupId};
 
 pub struct DocPrinter {
   src_file: Rc<SourceFile>,
+  last_group_id: usize,
 }
 
 impl DocPrinter {
   pub fn new(src_file: Rc<SourceFile>) -> Self {
-    Self { src_file }
+    Self {
+      src_file,
+      last_group_id: 0,
+    }
   }
 }
 
@@ -43,6 +48,11 @@ impl DocPrinter {
   fn have_line_between_spans(&self, cur_hi: BytePos, next_lo: BytePos) -> bool {
     self.src_file.lookup_line(cur_hi).unwrap_or(0) + 1
       < self.src_file.lookup_line(next_lo).unwrap_or(0)
+  }
+
+  fn group_id(&mut self, name: &'static str) -> GroupId {
+    self.last_group_id += 1;
+    GroupId(self.last_group_id, name)
   }
 
   pub fn print_module(&mut self, module: &Module) -> anyhow::Result<Doc> {
@@ -105,7 +115,7 @@ impl DocPrinter {
     match decl {
       Decl::Class(_) => todo!(),
       Decl::Fn(fn_decl) => self.print_fn_decl(fn_decl),
-      Decl::Var(_) => todo!(),
+      Decl::Var(var_decl) => self.print_var_decl(var_decl),
       Decl::Using(_) => todo!(),
       Decl::TsInterface(_) => todo!(),
       Decl::TsTypeAlias(_) => todo!(),
@@ -186,6 +196,85 @@ impl DocPrinter {
     parts.push("}".into());
 
     Ok(Doc::new_concat(parts))
+  }
+
+  fn print_var_decl(&mut self, var_decl: &VarDecl) -> anyhow::Result<Doc> {
+    let decls = var_decl
+      .decls
+      .iter()
+      .map(|dtor| self.print_var_declarator(dtor))
+      .collect::<anyhow::Result<Vec<Doc>>>()?;
+
+    let mut parts = Vec::new();
+
+    let kind = match var_decl.kind {
+      VarDeclKind::Var => "var",
+      VarDeclKind::Let => "let",
+      VarDeclKind::Const => "const",
+    };
+    parts.push(kind.into());
+
+    if let Some((first, rest)) = decls.split_first() {
+      let has_value = var_decl.decls.iter().any(|decl| decl.init.is_some());
+
+      parts.push(" ".into());
+      parts.push(first.clone());
+
+      parts.push(Doc::new_indent(Doc::new_concat(
+        rest
+          .into_iter()
+          .map(|decl| {
+            Doc::new_concat(vec![
+              ",".into(),
+              if has_value {
+                Doc::hardline()
+              } else {
+                Doc::line()
+              },
+              decl.clone(),
+            ])
+          })
+          .collect(),
+      )));
+    }
+
+    parts.push(";".into());
+
+    let doc = Doc::new_group(Doc::new_concat(parts), false, None, None);
+    Ok(doc)
+  }
+
+  fn print_var_declarator(
+    &mut self,
+    var_declarator: &VarDeclarator,
+  ) -> anyhow::Result<Doc> {
+    let left_doc = self.print_pat(&var_declarator.name)?;
+
+    if let Some(init) = &var_declarator.init {
+      let right_doc = self.print_expr(init)?;
+
+      let group_id = self.group_id("assignment");
+      let doc = Doc::new_group(
+        Doc::new_concat(vec![
+          Doc::new_group(left_doc, false, None, None),
+          " =".into(),
+          Doc::new_group(
+            Doc::new_indent(Doc::line()),
+            false,
+            None,
+            Some(group_id),
+          ),
+          // TODO lineSuffixBoundary
+          Doc::new_indent_if_break(right_doc, Some(group_id), false),
+        ]),
+        false,
+        None,
+        None,
+      );
+      Ok(doc)
+    } else {
+      Ok(left_doc)
+    }
   }
 
   fn print_pat(&mut self, pat: &Pat) -> anyhow::Result<Doc> {
@@ -290,7 +379,7 @@ impl DocPrinter {
       } else if needs_forced_trailing_comma {
         ",".into()
       } else {
-        Doc::new_if_break(",".into(), "".into())
+        Doc::new_if_break(",".into(), "".into(), None)
       };
 
       let mut elems_parts = Vec::new();
@@ -342,8 +431,8 @@ impl DocPrinter {
 
   fn print_call_expr(&mut self, call_expr: &CallExpr) -> anyhow::Result<Doc> {
     let callee_doc = match &call_expr.callee {
-      swc_ecma_ast::Callee::Super(_) => Doc::Text("super".to_string()),
-      swc_ecma_ast::Callee::Import(_) => Doc::Text("import".to_string()),
+      swc_ecma_ast::Callee::Super(_) => "super".into(),
+      swc_ecma_ast::Callee::Import(_) => "import".into(),
       swc_ecma_ast::Callee::Expr(expr) => self.print_expr(expr)?,
     };
 
@@ -400,7 +489,7 @@ impl DocPrinter {
           } else {
             parts.push(Doc::line());
           }
-          Doc::Array(parts)
+          Doc::new_concat(parts)
         } else {
           doc
         };
@@ -418,7 +507,7 @@ impl DocPrinter {
         Doc::new_indent(Doc::new_concat(
           [Doc::softline()].into_iter().chain(args).collect(),
         )),
-        Doc::new_if_break(",".into(), "".into()),
+        Doc::new_if_break(",".into(), "".into(), None),
         Doc::softline(),
         ")".into(),
       ])
