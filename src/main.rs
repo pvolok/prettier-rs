@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use doc_printer::{print_doc, DocWriter};
-use swc_common::{sync::Lrc, SourceMap};
+use swc_common::{comments::SingleThreadedComments, sync::Lrc, SourceMap};
 use swc_ecma_parser::EsConfig;
 
 use crate::ast_printer::AstPrinter;
@@ -22,16 +22,19 @@ fn main() {
   let path = PathBuf::from("example.js");
   let src_file = cm.load_file(&path).unwrap();
 
+  let comments = SingleThreadedComments::default();
   let module_ast = swc_ecma_parser::parse_file_as_module(
     &src_file,
     swc_ecma_parser::Syntax::Es(es_config),
     swc_ecma_ast::EsVersion::EsNext,
-    None,
+    Some(&comments),
     &mut errors,
   )
   .unwrap();
 
-  let mut printer = AstPrinter::new(src_file.clone());
+  println!("COMMENTS:\n{:#?}\n", comments);
+
+  let mut printer = AstPrinter::new(src_file.clone(), comments);
   let doc = printer.print_module(&module_ast).unwrap();
 
   println!("DOC:\n{:#?}\n", doc);

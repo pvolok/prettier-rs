@@ -1,30 +1,37 @@
 use std::rc::Rc;
 
-use swc_common::{BytePos, SourceFile, Spanned};
+use swc_common::{
+  comments::SingleThreadedComments, BytePos, SourceFile, Spanned,
+};
 use swc_ecma_ast::{
   ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, FnDecl,
   ForHead, ForOfStmt, ForStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem,
-  NewExpr, ObjectLit, Pat, Program, Prop, PropName, PropOrSpread, Stmt,
+  NewExpr, ObjectLit, Pat, Program, Prop, PropName, PropOrSpread, Stmt, Tpl,
   VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
 };
 
 use crate::{
   doc::{Doc, GroupId},
   doc_printer::string_width,
-  print_js::bin_expr::print_bin_expr,
+  print_js::{bin_expr::print_bin_expr, comments::print_dangling_comments},
 };
 
 pub struct AstPrinter {
   src_file: Rc<SourceFile>,
+  comments: SingleThreadedComments,
   last_group_id: usize,
 
   tab_width: i32,
 }
 
 impl AstPrinter {
-  pub fn new(src_file: Rc<SourceFile>) -> Self {
+  pub fn new(
+    src_file: Rc<SourceFile>,
+    comments: SingleThreadedComments,
+  ) -> Self {
     Self {
       src_file,
+      comments,
       last_group_id: 0,
 
       tab_width: 2,
@@ -492,10 +499,26 @@ impl AstPrinter {
   }
 
   fn print_expr_stmt(&mut self, expr_stmt: &ExprStmt) -> anyhow::Result<Doc> {
-    Ok(Doc::new_concat(vec![
-      self.print_expr(&expr_stmt.expr)?,
-      ";".into(),
-    ]))
+    let mut parts = Vec::new();
+
+    parts.push(self.print_expr(&expr_stmt.expr)?);
+    parts.push(";".into());
+
+    if self
+      .comments
+      .with_trailing(expr_stmt.span_hi(), |comments| !comments.is_empty())
+    {
+      parts.push(" ".into());
+      self.comments.with_trailing(
+        expr_stmt.span_hi(),
+        |comments| -> anyhow::Result<()> {
+          parts.push(print_dangling_comments(comments)?);
+          Ok(())
+        },
+      )?;
+    }
+
+    Ok(Doc::new_concat(parts))
   }
 
   pub fn print_expr(&mut self, expr: &Expr) -> anyhow::Result<Doc> {
@@ -516,7 +539,7 @@ impl AstPrinter {
       Expr::Seq(_) => todo!(),
       Expr::Ident(ident) => Doc::new_text(ident.sym.to_string()),
       Expr::Lit(lit) => self.print_lit(lit)?,
-      Expr::Tpl(_) => todo!(),
+      Expr::Tpl(tpl) => self.print_tpl(tpl)?,
       Expr::TaggedTpl(_) => todo!(),
       Expr::Arrow(_) => todo!(),
       Expr::Class(_) => todo!(),
@@ -895,5 +918,9 @@ impl AstPrinter {
     };
 
     Ok(doc)
+  }
+
+  fn print_tpl(&mut self, tpl: &Tpl) -> anyhow::Result<Doc> {
+    todo!()
   }
 }
