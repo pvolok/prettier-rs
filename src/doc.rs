@@ -9,7 +9,10 @@ pub enum Doc {
     break_: bool,
     expanded_states: Option<Vec<Doc>>,
   },
-  Fill(Rc<Vec<Doc>>),
+  Fill {
+    items: Rc<Vec<Doc>>,
+    offset: usize,
+  },
   IfBreak {
     break_doc: Rc<Doc>,
     flat_doc: Rc<Doc>,
@@ -70,7 +73,10 @@ impl Doc {
   }
 
   pub fn new_fill(parts: Vec<Doc>) -> Self {
-    Doc::Fill(parts.into())
+    Doc::Fill {
+      items: parts.into(),
+      offset: 0,
+    }
   }
 
   pub fn new_if_break(

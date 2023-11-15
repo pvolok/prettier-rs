@@ -93,7 +93,7 @@ pub fn print_doc(
 ) -> std::fmt::Result {
   let mut group_mode_map = HashMap::<GroupId, BreakMode>::new();
 
-  let mut width = PRINT_WIDTH;
+  let width = PRINT_WIDTH;
   let mut pos: i32 = 0;
 
   let mut cmds = Vec::<Command>::new();
@@ -158,13 +158,127 @@ pub fn print_doc(
           }
         }
       }
-      Doc::Fill(_) => todo!(),
+      // Fills each line with as much code as possible before moving to a new
+      // line with the same indentation.
+      //
+      // Expects doc.parts to be an array of alternating content and
+      // whitespace. The whitespace contains the linebreaks.
+      //
+      // For example:
+      //   ["I", line, "love", line, "monkeys"]
+      // or
+      //   [{ type: group, ... }, softline, { type: group, ... }]
+      //
+      // It uses this parts structure to handle three main layout cases:
+      // * The first two content items fit on the same line without
+      //   breaking
+      //   -> output the first content item and the whitespace "flat".
+      // * Only the first content item fits on the line without breaking
+      //   -> output the first content item "flat" and the whitespace with
+      //   "break".
+      // * Neither content item fits on the line without breaking
+      //   -> output the first content item and the whitespace with "break".
+      Doc::Fill { items, offset } => {
+        let rem = width - pos;
+
+        if let Some(content) = items.get(offset) {
+          let content_flat_cmd = Command {
+            ind: ind.clone(),
+            mode: BreakMode::Flat,
+            doc: content.clone(),
+          };
+          let content_break_cmd = Command {
+            ind: ind.clone(),
+            mode: BreakMode::Break,
+            doc: content.clone(),
+          };
+          let content_fits = fits(
+            &content_flat_cmd,
+            &[],
+            rem,
+            false,
+            &mut group_mode_map,
+            true,
+          );
+
+          if let Some(whitespace) = items.get(offset + 1) {
+            let whitespace_flat_cmd = Command {
+              ind: ind.clone(),
+              mode: BreakMode::Flat,
+              doc: whitespace.clone(),
+            };
+            let whitespace_break_cmd = Command {
+              ind: ind.clone(),
+              mode: BreakMode::Break,
+              doc: whitespace.clone(),
+            };
+
+            if let Some(second_content) = items.get(offset + 2) {
+              let remaining_cmd = Command {
+                ind: ind.clone(),
+                mode,
+                doc: Doc::Fill {
+                  items: items.clone(),
+                  offset: offset + 2,
+                },
+              };
+              let first_and_second_flat_cmd = Command {
+                ind: ind.clone(),
+                mode: BreakMode::Flat,
+                doc: Doc::new_concat(vec![
+                  content.clone(),
+                  whitespace.clone(),
+                  second_content.clone(),
+                ]),
+              };
+              let first_and_second_content_fits = fits(
+                &first_and_second_flat_cmd,
+                &[],
+                rem,
+                false,
+                &mut group_mode_map,
+                true,
+              );
+
+              if first_and_second_content_fits {
+                cmds.push(remaining_cmd);
+                cmds.push(whitespace_flat_cmd);
+                cmds.push(content_flat_cmd);
+              } else if content_fits {
+                cmds.push(remaining_cmd);
+                cmds.push(whitespace_break_cmd);
+                cmds.push(content_flat_cmd);
+              } else {
+                cmds.push(remaining_cmd);
+                cmds.push(whitespace_break_cmd);
+                cmds.push(content_break_cmd);
+              }
+            } else {
+              if content_fits {
+                cmds.push(whitespace_flat_cmd);
+                cmds.push(content_flat_cmd);
+              } else {
+                cmds.push(whitespace_break_cmd);
+                cmds.push(content_break_cmd);
+              }
+            }
+          } else {
+            if content_fits {
+              cmds.push(content_flat_cmd);
+            } else {
+              cmds.push(content_break_cmd);
+            }
+          }
+        }
+      }
       Doc::IfBreak {
         break_doc,
         flat_doc,
         group_id,
       } => {
-        match mode {
+        let group_mode =
+          group_id.map_or(mode, |id| *group_mode_map.get(&id).unwrap());
+        match group_mode {
           BreakMode::Break => {
             cmds.push(Command {
               ind: ind.clone(),
@@ -326,7 +440,6 @@ fn fits(
         // cmds.push({ mode: groupMode, doc: contents });
         cmds.push((group_mode, contents.as_ref().clone()));
       }
-      Doc::Fill(_) => todo!(),
       Doc::IfBreak {
         break_doc,
         flat_doc,
@@ -376,6 +489,11 @@ fn fits(
       }
       Doc::Array(docs) => {
         for doc in docs.iter().rev() {
+          cmds.push((mode, doc.clone()));
+        }
+      }
+      Doc::Fill { items, offset } => {
+        for doc in items.iter().skip(offset).rev() {
           cmds.push((mode, doc.clone()));
         }
       }

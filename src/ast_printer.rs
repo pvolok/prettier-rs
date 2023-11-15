@@ -98,7 +98,7 @@ impl AstPrinter {
 
   fn print_stmt(&mut self, stmt: &Stmt) -> anyhow::Result<Doc> {
     match stmt {
-      Stmt::Block(block_stmt) => self.print_block_stmt(block_stmt),
+      Stmt::Block(block_stmt) => self.print_block_stmt(block_stmt, true),
       Stmt::Empty(_) => todo!(),
       Stmt::Debugger(_) => todo!(),
       Stmt::With(_) => todo!(),
@@ -123,6 +123,7 @@ impl AstPrinter {
   fn print_block_stmt(
     &mut self,
     block_stmt: &BlockStmt,
+    empty_hardline: bool,
   ) -> anyhow::Result<Doc> {
     let mut parts = Vec::new();
 
@@ -144,6 +145,8 @@ impl AstPrinter {
       parts.push(Doc::new_indent(Doc::new_concat(
         [Doc::hardline()].into_iter().chain(body_parts).collect(),
       )));
+      parts.push(Doc::hardline());
+    } else if empty_hardline {
       parts.push(Doc::hardline());
     }
 
@@ -317,7 +320,7 @@ impl AstPrinter {
 
     if let Some(body) = &fn_decl.function.body {
       parts.push(" ".into());
-      parts.push(self.print_block_stmt(body)?);
+      parts.push(self.print_block_stmt(body, false)?);
     }
 
     let doc = Doc::new_concat(parts);
@@ -387,7 +390,7 @@ impl AstPrinter {
       match doc {
         Doc::Align(doc, _) => calc_doc_width(doc),
         Doc::Group { contents, .. } => calc_doc_width(&contents),
-        Doc::Fill(items) => items.iter().map(calc_doc_width).sum(),
+        Doc::Fill { items, .. } => items.iter().map(calc_doc_width).sum(),
         Doc::IfBreak { flat_doc, .. } => calc_doc_width(&flat_doc),
         Doc::Indent(doc) => calc_doc_width(doc),
         Doc::IndentIfBreak { contents, .. } => calc_doc_width(&contents),
@@ -564,58 +567,98 @@ impl AstPrinter {
       //   [1,,].length === 2
       let needs_forced_trailing_comma = last_elem.is_none();
 
+      let group_id = self.group_id("array");
+
       // TODO
       let should_break = false;
+
+      let should_use_concise_formatting = array_lit.elems.iter().all(|el| {
+        el.as_ref().map_or(false, |el| {
+          matches!(el.expr.as_ref(), Expr::Lit(Lit::Num(_)))
+        })
+      });
 
       let trailing_comma = if !can_have_trailing_comma {
         "".into()
       } else if needs_forced_trailing_comma {
         ",".into()
+      } else if should_use_concise_formatting {
+        Doc::new_if_break(",".into(), "".into(), Some(group_id))
       } else {
         Doc::new_if_break(",".into(), "".into(), None)
       };
 
-      let mut elems_parts = Vec::new();
-      for (i, elem) in array_lit.elems.iter().enumerate() {
-        let is_last = i == array_lit.elems.len() - 1;
+      let elems_doc = if should_use_concise_formatting {
+        let mut elems_parts = Vec::new();
+        for (i, elem) in array_lit.elems.iter().enumerate() {
+          let is_last = i == array_lit.elems.len() - 1;
 
-        let mut elem_parts = Vec::new();
-        if let Some(elem) = elem {
-          if elem.spread.is_some() {
-            elem_parts.push("...".into());
-          }
-          elem_parts.push(self.print_expr(&elem.expr)?);
-        }
-        elems_parts.push(Doc::new_group(
-          Doc::new_concat(elem_parts),
-          false,
-          None,
-          None,
-        ));
+          let elem_doc = if let Some(elem) = elem {
+            self.print_expr(&elem.expr)?
+          } else {
+            Doc::from("")
+          };
+          let comma = if is_last {
+            trailing_comma.clone()
+          } else {
+            ",".into()
+          };
+          elems_parts.push(Doc::new_concat(vec![elem_doc, comma]));
 
-        if !is_last {
-          elems_parts.push(",".into());
-          elems_parts.push(Doc::line());
-          if self.is_next_line_empty(&array_lit.elems, i) {
-            elems_parts.push(Doc::softline());
+          if !is_last {
+            if self.is_next_line_empty(&array_lit.elems, i) {
+              elems_parts
+                .push(Doc::new_concat(vec![Doc::hardline(), Doc::hardline()]));
+            } else {
+              elems_parts.push(Doc::line());
+            }
           }
         }
-      }
+
+        Doc::new_fill(elems_parts)
+      } else {
+        let mut elems_parts = Vec::new();
+        for (i, elem) in array_lit.elems.iter().enumerate() {
+          let is_last = i == array_lit.elems.len() - 1;
+
+          let mut elem_parts = Vec::new();
+          if let Some(elem) = elem {
+            if elem.spread.is_some() {
+              elem_parts.push("...".into());
+            }
+            elem_parts.push(self.print_expr(&elem.expr)?);
+          }
+          elems_parts.push(Doc::new_group(
+            Doc::new_concat(elem_parts),
+            false,
+            None,
+            None,
+          ));
+
+          if !is_last {
+            elems_parts.push(",".into());
+            elems_parts.push(Doc::line());
+            if self.is_next_line_empty(&array_lit.elems, i) {
+              elems_parts.push(Doc::softline());
+            }
+          }
+        }
+
+        elems_parts.push(trailing_comma);
+
+        Doc::new_concat(elems_parts)
+      };
 
       parts.push(Doc::new_group(
         Doc::new_concat(vec![
           open_bracket.into(),
-          Doc::new_indent(Doc::new_concat(vec![
-            Doc::softline(),
-            Doc::new_concat(elems_parts),
-            trailing_comma.into(),
-          ])),
+          Doc::new_indent(Doc::new_concat(vec![Doc::softline(), elems_doc])),
           Doc::softline(),
           close_bracket.into(),
         ]),
         should_break,
         None,
-        None,
+        Some(group_id),
       ))
     }
 
