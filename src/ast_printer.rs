@@ -2,9 +2,10 @@ use std::rc::Rc;
 
 use swc_common::{BytePos, SourceFile, Spanned};
 use swc_ecma_ast::{
-  ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprStmt, FnDecl, Lit, MemberExpr,
-  MemberProp, Module, ModuleItem, ObjectLit, Pat, Program, Prop, PropName,
-  PropOrSpread, Stmt, VarDecl, VarDeclKind, VarDeclarator,
+  ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, FnDecl,
+  Lit, MemberExpr, MemberProp, Module, ModuleItem, NewExpr, ObjectLit, Pat,
+  Program, Prop, PropName, PropOrSpread, Stmt, VarDecl, VarDeclKind,
+  VarDeclarator,
 };
 
 use crate::{
@@ -384,7 +385,7 @@ impl AstPrinter {
       Expr::SuperProp(_) => todo!(),
       Expr::Cond(_) => todo!(),
       Expr::Call(call_expr) => self.print_call_expr(call_expr)?,
-      Expr::New(_) => todo!(),
+      Expr::New(new_expr) => self.print_new_expr(new_expr)?,
       Expr::Seq(_) => todo!(),
       Expr::Ident(ident) => Doc::new_text(ident.sym.to_string()),
       Expr::Lit(lit) => self.print_lit(lit)?,
@@ -560,15 +561,19 @@ impl AstPrinter {
       })
       .collect::<anyhow::Result<Vec<Doc>>>()?;
 
-    let parts = vec![
-      "{".into(),
-      Doc::new_indent(Doc::new_concat(
-        [Doc::line()].into_iter().chain(props).collect(),
-      )),
-      Doc::new_if_break(",".into(), "".into(), None),
-      Doc::line(),
-      "}".into(),
-    ];
+    let parts = if props.is_empty() {
+      vec!["{".into(), "}".into()]
+    } else {
+      vec![
+        "{".into(),
+        Doc::new_indent(Doc::new_concat(
+          [Doc::line()].into_iter().chain(props).collect(),
+        )),
+        Doc::new_if_break(",".into(), "".into(), None),
+        Doc::line(),
+        "}".into(),
+      ]
+    };
 
     Ok(Doc::new_concat(parts))
   }
@@ -614,7 +619,7 @@ impl AstPrinter {
       swc_ecma_ast::Callee::Expr(expr) => self.print_expr(expr)?,
     };
 
-    let args = self.print_call_expr_args(call_expr)?;
+    let args = self.print_call_expr_args(&call_expr.args)?;
 
     let doc = Doc::new_concat(vec![callee_doc, args]);
 
@@ -623,10 +628,10 @@ impl AstPrinter {
 
   fn print_call_expr_args(
     &mut self,
-    call_expr: &CallExpr,
+    args: &[ExprOrSpread],
   ) -> anyhow::Result<Doc> {
     let mut any_arg_empty_line = false;
-    let args_len = call_expr.args.len();
+    let args_len = args.len();
 
     let all_args_broken_out = |args: Vec<Doc>| -> Doc {
       Doc::new_group(
@@ -645,8 +650,7 @@ impl AstPrinter {
       )
     };
 
-    let args = call_expr
-      .args
+    let args = args
       .iter()
       .enumerate()
       .map(|(i, expr_or_spread)| {
@@ -660,7 +664,7 @@ impl AstPrinter {
         let doc = if !is_last {
           let mut parts = vec![doc, ",".into()];
 
-          if self.is_next_line_empty(&call_expr.args, i) {
+          if self.is_next_line_empty(args, i) {
             any_arg_empty_line = true;
             parts.push(Doc::hardline());
             parts.push(Doc::hardline());
@@ -694,6 +698,20 @@ impl AstPrinter {
       None,
       None,
     );
+
+    Ok(doc)
+  }
+
+  fn print_new_expr(&mut self, new_expr: &NewExpr) -> anyhow::Result<Doc> {
+    let callee_doc = self.print_expr(&new_expr.callee)?;
+
+    let args = if let Some(args) = &new_expr.args {
+      self.print_call_expr_args(args)?
+    } else {
+      self.print_call_expr_args(&[])?
+    };
+
+    let doc = Doc::new_concat(vec!["new ".into(), callee_doc, args]);
 
     Ok(doc)
   }
