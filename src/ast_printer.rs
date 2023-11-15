@@ -3,9 +3,9 @@ use std::rc::Rc;
 use swc_common::{BytePos, SourceFile, Spanned};
 use swc_ecma_ast::{
   ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, FnDecl,
-  Lit, MemberExpr, MemberProp, Module, ModuleItem, NewExpr, ObjectLit, Pat,
-  Program, Prop, PropName, PropOrSpread, Stmt, VarDecl, VarDeclKind,
-  VarDeclarator,
+  ForStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem, NewExpr, ObjectLit,
+  Pat, Program, Prop, PropName, PropOrSpread, Stmt, VarDecl, VarDeclKind,
+  VarDeclOrExpr, VarDeclarator,
 };
 
 use crate::{
@@ -98,7 +98,7 @@ impl AstPrinter {
 
   fn print_stmt(&mut self, stmt: &Stmt) -> anyhow::Result<Doc> {
     match stmt {
-      Stmt::Block(_) => todo!(),
+      Stmt::Block(block_stmt) => self.print_block_stmt(block_stmt),
       Stmt::Empty(_) => todo!(),
       Stmt::Debugger(_) => todo!(),
       Stmt::With(_) => todo!(),
@@ -112,7 +112,7 @@ impl AstPrinter {
       Stmt::Try(_) => todo!(),
       Stmt::While(_) => todo!(),
       Stmt::DoWhile(_) => todo!(),
-      Stmt::For(_) => todo!(),
+      Stmt::For(for_stmt) => self.print_for_stmt(for_stmt),
       Stmt::ForIn(_) => todo!(),
       Stmt::ForOf(_) => todo!(),
       Stmt::Decl(decl) => self.print_decl(decl),
@@ -120,11 +120,120 @@ impl AstPrinter {
     }
   }
 
+  fn print_block_stmt(
+    &mut self,
+    block_stmt: &BlockStmt,
+  ) -> anyhow::Result<Doc> {
+    let mut parts = Vec::new();
+
+    parts.push("{".into());
+
+    let mut body_parts = Vec::new();
+    for (i, stmt) in block_stmt.stmts.iter().enumerate() {
+      let is_last = i == block_stmt.stmts.len() - 1;
+
+      body_parts.push(self.print_stmt(stmt)?);
+      if !is_last {
+        body_parts.push(Doc::hardline());
+        if self.is_next_line_empty(&block_stmt.stmts, i) {
+          body_parts.push(Doc::hardline());
+        }
+      }
+    }
+    if !body_parts.is_empty() {
+      parts.push(Doc::new_indent(Doc::new_concat(
+        [Doc::hardline()].into_iter().chain(body_parts).collect(),
+      )));
+      parts.push(Doc::hardline());
+    }
+
+    parts.push("}".into());
+
+    Ok(Doc::new_concat(parts))
+  }
+
+  fn print_for_stmt(&mut self, for_stmt: &ForStmt) -> anyhow::Result<Doc> {
+    let body_doc = match for_stmt.body.as_ref() {
+      Stmt::Block(_) => {
+        Doc::new_concat(vec![" ".into(), self.print_stmt(&for_stmt.body)?])
+      }
+      Stmt::Empty(_) => ";".into(),
+      _ => Doc::new_indent(Doc::new_concat(vec![
+        Doc::line(),
+        self.print_stmt(&for_stmt.body)?,
+      ])),
+    };
+
+    if for_stmt.init.is_none()
+      && for_stmt.test.is_none()
+      && for_stmt.update.is_none()
+    {
+      let doc = Doc::new_group(
+        Doc::new_concat(vec!["for (;;)".into(), body_doc]),
+        false,
+        None,
+        None,
+      );
+      return Ok(doc);
+    }
+
+    let init_doc = if let Some(init) = &for_stmt.init {
+      match init {
+        VarDeclOrExpr::VarDecl(var_decl) => self.print_var_decl(var_decl, true),
+        VarDeclOrExpr::Expr(expr) => self.print_expr(expr),
+      }?
+    } else {
+      "".into()
+    };
+    let test_doc = for_stmt
+      .test
+      .as_ref()
+      .map(|e| self.print_expr(&e))
+      .transpose()?
+      .unwrap_or_else(|| "".into());
+    let update_doc = for_stmt
+      .update
+      .as_ref()
+      .map(|e| self.print_expr(&e))
+      .transpose()?
+      .unwrap_or_else(|| "".into());
+
+    let doc = Doc::new_group(
+      Doc::new_concat(vec![
+        "for (".into(),
+        Doc::new_group(
+          Doc::new_concat(vec![
+            Doc::new_indent(Doc::new_concat(vec![
+              Doc::softline(),
+              init_doc,
+              ";".into(),
+              Doc::line(),
+              test_doc,
+              ";".into(),
+              Doc::line(),
+              update_doc,
+            ])),
+            Doc::softline(),
+          ]),
+          false,
+          None,
+          None,
+        ),
+        ")".into(),
+        body_doc,
+      ]),
+      false,
+      None,
+      None,
+    );
+    Ok(doc)
+  }
+
   fn print_decl(&mut self, decl: &Decl) -> anyhow::Result<Doc> {
     match decl {
       Decl::Class(_) => todo!(),
       Decl::Fn(fn_decl) => self.print_fn_decl(fn_decl),
-      Decl::Var(var_decl) => self.print_var_decl(var_decl),
+      Decl::Var(var_decl) => self.print_var_decl(var_decl, false),
       Decl::Using(_) => todo!(),
       Decl::TsInterface(_) => todo!(),
       Decl::TsTypeAlias(_) => todo!(),
@@ -175,39 +284,11 @@ impl AstPrinter {
     Ok(doc)
   }
 
-  fn print_block_stmt(
+  fn print_var_decl(
     &mut self,
-    block_stmt: &BlockStmt,
+    var_decl: &VarDecl,
+    in_for: bool,
   ) -> anyhow::Result<Doc> {
-    let mut parts = Vec::new();
-
-    parts.push("{".into());
-
-    let mut body_parts = Vec::new();
-    for (i, stmt) in block_stmt.stmts.iter().enumerate() {
-      let is_last = i == block_stmt.stmts.len() - 1;
-
-      body_parts.push(self.print_stmt(stmt)?);
-      if !is_last {
-        body_parts.push(Doc::hardline());
-        if self.is_next_line_empty(&block_stmt.stmts, i) {
-          body_parts.push(Doc::hardline());
-        }
-      }
-    }
-    if !body_parts.is_empty() {
-      parts.push(Doc::new_indent(Doc::new_concat(
-        [Doc::hardline()].into_iter().chain(body_parts).collect(),
-      )));
-      parts.push(Doc::hardline());
-    }
-
-    parts.push("}".into());
-
-    Ok(Doc::new_concat(parts))
-  }
-
-  fn print_var_decl(&mut self, var_decl: &VarDecl) -> anyhow::Result<Doc> {
     let decls = var_decl
       .decls
       .iter()
@@ -247,7 +328,9 @@ impl AstPrinter {
       )));
     }
 
-    parts.push(";".into());
+    if !in_for {
+      parts.push(";".into());
+    }
 
     let doc = Doc::new_group(Doc::new_concat(parts), false, None, None);
     Ok(doc)
