@@ -3,9 +3,9 @@ use std::rc::Rc;
 use swc_common::{BytePos, SourceFile, Spanned};
 use swc_ecma_ast::{
   ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, FnDecl,
-  ForStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem, NewExpr, ObjectLit,
-  Pat, Program, Prop, PropName, PropOrSpread, Stmt, VarDecl, VarDeclKind,
-  VarDeclOrExpr, VarDeclarator,
+  ForHead, ForOfStmt, ForStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem,
+  NewExpr, ObjectLit, Pat, Program, Prop, PropName, PropOrSpread, Stmt,
+  VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
 };
 
 use crate::{
@@ -114,7 +114,7 @@ impl AstPrinter {
       Stmt::DoWhile(_) => todo!(),
       Stmt::For(for_stmt) => self.print_for_stmt(for_stmt),
       Stmt::ForIn(_) => todo!(),
-      Stmt::ForOf(_) => todo!(),
+      Stmt::ForOf(for_of_stmt) => self.print_for_of_stmt(for_of_stmt),
       Stmt::Decl(decl) => self.print_decl(decl),
       Stmt::Expr(expr_stmt) => self.print_expr_stmt(expr_stmt),
     }
@@ -219,6 +219,47 @@ impl AstPrinter {
           None,
           None,
         ),
+        ")".into(),
+        body_doc,
+      ]),
+      false,
+      None,
+      None,
+    );
+    Ok(doc)
+  }
+
+  fn print_for_of_stmt(
+    &mut self,
+    for_of_stmt: &ForOfStmt,
+  ) -> anyhow::Result<Doc> {
+    let body_doc = match for_of_stmt.body.as_ref() {
+      Stmt::Block(_) => {
+        Doc::new_concat(vec![" ".into(), self.print_stmt(&for_of_stmt.body)?])
+      }
+      Stmt::Empty(_) => ";".into(),
+      _ => Doc::new_indent(Doc::new_concat(vec![
+        Doc::line(),
+        self.print_stmt(&for_of_stmt.body)?,
+      ])),
+    };
+
+    let maybe_await = if for_of_stmt.is_await { " await" } else { "" }.into();
+
+    let left_doc = match &for_of_stmt.left {
+      ForHead::VarDecl(var_decl) => self.print_var_decl(var_decl, true),
+      ForHead::UsingDecl(using_decl) => todo!(),
+      ForHead::Pat(pat) => self.print_pat(pat),
+    }?;
+
+    let doc = Doc::new_group(
+      Doc::new_concat(vec![
+        "for".into(),
+        maybe_await,
+        " (".into(),
+        left_doc,
+        " of ".into(),
+        self.print_expr(&for_of_stmt.right)?,
         ")".into(),
         body_doc,
       ]),
