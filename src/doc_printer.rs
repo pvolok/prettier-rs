@@ -385,7 +385,7 @@ fn fits(
   false
 }
 
-fn string_width(s: &str) -> i32 {
+pub fn string_width(s: &str) -> i32 {
   s.chars()
     .map(|c| {
       if c.is_control() {

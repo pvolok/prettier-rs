@@ -9,12 +9,15 @@ use swc_ecma_ast::{
 
 use crate::{
   doc::{Doc, GroupId},
+  doc_printer::string_width,
   print_js::bin_expr::print_bin_expr,
 };
 
 pub struct AstPrinter {
   src_file: Rc<SourceFile>,
   last_group_id: usize,
+
+  tab_width: i32,
 }
 
 impl AstPrinter {
@@ -22,6 +25,8 @@ impl AstPrinter {
     Self {
       src_file,
       last_group_id: 0,
+
+      tab_width: 2,
     }
   }
 }
@@ -253,8 +258,68 @@ impl AstPrinter {
   ) -> anyhow::Result<Doc> {
     let left_doc = self.print_pat(&var_declarator.name)?;
 
+    fn calc_doc_width(doc: &Doc) -> i32 {
+      match doc {
+        Doc::Align(doc, _) => calc_doc_width(doc),
+        Doc::Group { contents, .. } => calc_doc_width(&contents),
+        Doc::Fill(items) => items.iter().map(calc_doc_width).sum(),
+        Doc::IfBreak { flat_doc, .. } => calc_doc_width(&flat_doc),
+        Doc::Indent(doc) => calc_doc_width(doc),
+        Doc::IndentIfBreak { contents, .. } => calc_doc_width(&contents),
+        Doc::LineSuffix(_) => todo!(),
+        Doc::LineSuffixBoundary => todo!(),
+        Doc::BreakParent => todo!(),
+        Doc::Trim => todo!(),
+        Doc::Line { soft, .. } => {
+          if *soft {
+            0
+          } else {
+            1
+          }
+        }
+        Doc::Cursor => todo!(),
+        Doc::Label(_, _) => todo!(),
+        Doc::Text(s) => string_width(s),
+        Doc::Array(elems) => elems.iter().map(calc_doc_width).sum(),
+      }
+    }
+
     if let Some(init) = &var_declarator.init {
       let right_doc = self.print_expr(init)?;
+
+      const MIN_OVERLAP_FOR_BREAK: i32 = 3;
+      //   ↓↓ - insufficient overlap for a line break
+      // key1: longValue1,
+      //   ↓↓↓↓↓↓ - overlap is long enough to break
+      // key2abcd:
+      //   longValue2
+      let has_short_key =
+        calc_doc_width(&left_doc) < self.tab_width + MIN_OVERLAP_FOR_BREAK;
+
+      let should_break_after_operator = match init.as_ref() {
+        Expr::Array(array_lit) if array_lit.elems.len() > 0 => false,
+        Expr::Object(object_lit) if object_lit.props.len() > 0 => false,
+        _ => true,
+      };
+      if should_break_after_operator {
+        // return group([group(leftDoc), operator, group(indent([line, rightDoc]))]);
+        let doc = Doc::new_group(
+          Doc::new_concat(vec![
+            Doc::new_group(left_doc, false, None, None),
+            " =".into(),
+            Doc::new_group(
+              Doc::new_indent(Doc::new_concat(vec![Doc::line(), right_doc])),
+              false,
+              None,
+              None,
+            ),
+          ]),
+          false,
+          None,
+          None,
+        );
+        return Ok(doc);
+      }
 
       let group_id = self.group_id("assignment");
       let doc = Doc::new_group(

@@ -57,11 +57,11 @@ pub fn print_bin_expr_inner(
   ]);
 
   let should_break = false;
-  let should_group = false;
+  let should_group = true;
 
   parts.push(if line_before_operator { "" } else { " " }.into());
   parts.push(if should_group {
-    Doc::new_group(right, true, None, None)
+    Doc::new_group(right, should_break, None, None)
   } else {
     right
   });
