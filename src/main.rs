@@ -6,11 +6,12 @@ use doc_printer::{print_doc, DocWriter};
 use swc_common::{sync::Lrc, SourceMap};
 use swc_ecma_parser::EsConfig;
 
-use crate::ast_printer::DocPrinter;
+use crate::ast_printer::AstPrinter;
 
 mod ast_printer;
 mod doc;
 mod doc_printer;
+mod print_js;
 
 fn main() {
   let es_config = EsConfig::default();
@@ -30,7 +31,7 @@ fn main() {
   )
   .unwrap();
 
-  let mut printer = DocPrinter::new(src_file.clone());
+  let mut printer = AstPrinter::new(src_file.clone());
   let doc = printer.print_module(&module_ast).unwrap();
 
   println!("DOC:\n{:#?}\n", doc);

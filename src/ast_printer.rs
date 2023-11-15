@@ -2,20 +2,22 @@ use std::rc::Rc;
 
 use swc_common::{BytePos, SourceFile, Spanned};
 use swc_ecma_ast::{
-  ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, FnDecl,
-  Ident, Lit, MemberExpr, MemberProp, Module, ModuleItem, ObjectLit, Pat,
-  Program, Prop, PropName, PropOrSpread, Stmt, TsThisTypeOrIdent, VarDecl,
-  VarDeclKind, VarDeclarator,
+  ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprStmt, FnDecl, Lit, MemberExpr,
+  MemberProp, Module, ModuleItem, ObjectLit, Pat, Program, Prop, PropName,
+  PropOrSpread, Stmt, VarDecl, VarDeclKind, VarDeclarator,
 };
 
-use crate::doc::{Doc, GroupId};
+use crate::{
+  doc::{Doc, GroupId},
+  print_js::bin_expr::print_bin_expr,
+};
 
-pub struct DocPrinter {
+pub struct AstPrinter {
   src_file: Rc<SourceFile>,
   last_group_id: usize,
 }
 
-impl DocPrinter {
+impl AstPrinter {
   pub fn new(src_file: Rc<SourceFile>) -> Self {
     Self {
       src_file,
@@ -24,7 +26,7 @@ impl DocPrinter {
   }
 }
 
-impl DocPrinter {
+impl AstPrinter {
   pub fn print_program(&mut self, program: &Program) -> anyhow::Result<Doc> {
     match program {
       Program::Module(module) => self.print_module(module),
@@ -303,7 +305,7 @@ impl DocPrinter {
     ]))
   }
 
-  fn print_expr(&mut self, expr: &Expr) -> anyhow::Result<Doc> {
+  pub fn print_expr(&mut self, expr: &Expr) -> anyhow::Result<Doc> {
     let doc = match expr {
       Expr::This(_) => todo!(),
       Expr::Array(array_lit) => self.print_array_lit(array_lit)?,
@@ -311,7 +313,7 @@ impl DocPrinter {
       Expr::Fn(_) => todo!(),
       Expr::Unary(_) => todo!(),
       Expr::Update(_) => todo!(),
-      Expr::Bin(_) => todo!(),
+      Expr::Bin(bin_expr) => print_bin_expr(self, bin_expr)?,
       Expr::Assign(_) => todo!(),
       Expr::Member(member_expr) => self.print_member_expr(member_expr)?,
       Expr::SuperProp(_) => todo!(),
