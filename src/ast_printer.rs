@@ -7,7 +7,7 @@ use swc_ecma_ast::{
   ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, FnDecl,
   ForHead, ForOfStmt, ForStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem,
   NewExpr, ObjectLit, Pat, Program, Prop, PropName, PropOrSpread, Stmt, Tpl,
-  VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
+  VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator, YieldExpr,
 };
 
 use crate::{
@@ -523,7 +523,7 @@ impl AstPrinter {
 
   pub fn print_expr(&mut self, expr: &Expr) -> anyhow::Result<Doc> {
     let doc = match expr {
-      Expr::This(_) => todo!(),
+      Expr::This(_this_expr) => "this".into(),
       Expr::Array(array_lit) => self.print_array_lit(array_lit)?,
       Expr::Object(object_lit) => self.print_object_lit(object_lit)?,
       Expr::Fn(_) => todo!(),
@@ -532,7 +532,7 @@ impl AstPrinter {
       Expr::Bin(bin_expr) => print_bin_expr(self, bin_expr)?,
       Expr::Assign(_) => todo!(),
       Expr::Member(member_expr) => self.print_member_expr(member_expr)?,
-      Expr::SuperProp(_) => todo!(),
+      Expr::SuperProp(super_props_expr) => todo!(),
       Expr::Cond(_) => todo!(),
       Expr::Call(call_expr) => self.print_call_expr(call_expr)?,
       Expr::New(new_expr) => self.print_new_expr(new_expr)?,
@@ -543,7 +543,7 @@ impl AstPrinter {
       Expr::TaggedTpl(_) => todo!(),
       Expr::Arrow(_) => todo!(),
       Expr::Class(_) => todo!(),
-      Expr::Yield(_) => todo!(),
+      Expr::Yield(yield_expr) => self.print_yield_expr(yield_expr)?,
       Expr::MetaProp(_) => todo!(),
       Expr::Await(_) => todo!(),
       Expr::Paren(_) => todo!(),
@@ -962,6 +962,25 @@ impl AstPrinter {
     }
 
     parts.push("`".into());
+
+    Ok(Doc::new_concat(parts))
+  }
+
+  fn print_yield_expr(
+    &mut self,
+    yield_expr: &YieldExpr,
+  ) -> anyhow::Result<Doc> {
+    let mut parts = Vec::new();
+    parts.push("yield".into());
+
+    if yield_expr.delegate {
+      parts.push("*".into());
+    }
+
+    if let Some(arg) = &yield_expr.arg {
+      parts.push(" ".into());
+      parts.push(self.print_expr(&arg)?);
+    }
 
     Ok(Doc::new_concat(parts))
   }
