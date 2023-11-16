@@ -12,7 +12,7 @@ use swc_ecma_ast::{
 
 use crate::{
   doc::{Doc, GroupId},
-  doc_printer::string_width,
+  doc_printer::{print_doc, string_width, DocWriter},
   print_js::{bin_expr::print_bin_expr, comments::print_dangling_comments},
 };
 
@@ -921,6 +921,48 @@ impl AstPrinter {
   }
 
   fn print_tpl(&mut self, tpl: &Tpl) -> anyhow::Result<Doc> {
-    todo!()
+    let mut parts = Vec::new();
+
+    let expr_docs = tpl
+      .exprs
+      .iter()
+      .map(|expr| self.print_expr(expr))
+      .collect::<anyhow::Result<Vec<Doc>>>()?;
+
+    let is_simple = true;
+
+    let expr_docs = if is_simple {
+      expr_docs
+        .into_iter()
+        .map(|doc| {
+          let mut out_str = String::new();
+          let mut out = DocWriter::String(&mut out_str);
+          print_doc(&mut out, &self.src_file, &doc).unwrap();
+          Doc::new_text(out_str)
+        })
+        .collect::<Vec<Doc>>()
+    } else {
+      expr_docs
+    };
+
+    parts.push("`".into());
+
+    let prev_quasi_indent_size = 0;
+    for (i, quasi) in tpl.quasis.iter().enumerate() {
+      parts.push(quasi.raw.as_str().into());
+
+      if let Some(expr_doc) = expr_docs.get(i) {
+        parts.push(Doc::new_group(
+          Doc::new_concat(vec!["${".into(), expr_doc.clone(), "}".into()]),
+          false,
+          None,
+          None,
+        ));
+      }
+    }
+
+    parts.push("`".into());
+
+    Ok(Doc::new_concat(parts))
   }
 }
