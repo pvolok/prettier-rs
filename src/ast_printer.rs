@@ -4,10 +4,15 @@ use swc_common::{
   comments::SingleThreadedComments, BytePos, SourceFile, Spanned,
 };
 use swc_ecma_ast::{
-  ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, ForHead,
-  ForOfStmt, ForStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem, NewExpr,
-  ObjectLit, Pat, Program, Prop, PropName, PropOrSpread, Stmt, Tpl, VarDecl,
-  VarDeclKind, VarDeclOrExpr, VarDeclarator, YieldExpr,
+  ArrayLit, AssignExpr, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread,
+  ExprStmt, ForHead, ForOfStmt, ForStmt, Lit, MemberExpr, MemberProp, Module,
+  ModuleItem, NewExpr, ObjectLit, Pat, PatOrExpr, Program, Prop, PropName,
+  PropOrSpread, Stmt, Tpl, VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
+  YieldExpr,
+};
+use swc_ecma_visit::{
+  fields::{AssignExprField, BlockStmtField, ForStmtField},
+  AstParentKind, AstParentNodeRef,
 };
 
 use crate::{
@@ -25,6 +30,8 @@ pub struct AstPrinter {
   comments: SingleThreadedComments,
   last_group_id: usize,
 
+  stack: Vec<AstParentKind>,
+
   tab_width: i32,
 }
 
@@ -37,6 +44,8 @@ impl AstPrinter {
       src_file,
       comments,
       last_group_id: 0,
+
+      stack: Vec::new(),
 
       tab_width: 2,
     }
@@ -107,6 +116,14 @@ impl AstPrinter {
     }
   }
 
+  pub fn push(&mut self, parent: AstParentKind) {
+    self.stack.push(parent);
+  }
+
+  pub fn pop(&mut self) {
+    self.stack.pop();
+  }
+
   fn print_stmt(&mut self, stmt: &Stmt) -> anyhow::Result<Doc> {
     match stmt {
       Stmt::Block(block_stmt) => self.print_block_stmt(block_stmt, true),
@@ -142,6 +159,7 @@ impl AstPrinter {
 
     let mut body_parts = Vec::new();
     for (i, stmt) in block_stmt.stmts.iter().enumerate() {
+      self.push(AstParentKind::BlockStmt(BlockStmtField::Stmts(i)));
       let is_last = i == block_stmt.stmts.len() - 1;
 
       body_parts.push(self.print_stmt(stmt)?);
@@ -151,6 +169,8 @@ impl AstPrinter {
           body_parts.push(Doc::hardline());
         }
       }
+
+      self.pop();
     }
     if !body_parts.is_empty() {
       parts.push(Doc::new_indent(Doc::new_concat(
@@ -167,6 +187,7 @@ impl AstPrinter {
   }
 
   fn print_for_stmt(&mut self, for_stmt: &ForStmt) -> anyhow::Result<Doc> {
+    self.push(AstParentKind::ForStmt(ForStmtField::Body));
     let body_doc = match for_stmt.body.as_ref() {
       Stmt::Block(_) => {
         Doc::new_concat(vec![" ".into(), self.print_stmt(&for_stmt.body)?])
@@ -177,6 +198,7 @@ impl AstPrinter {
         self.print_stmt(&for_stmt.body)?,
       ])),
     };
+    self.pop();
 
     if for_stmt.init.is_none()
       && for_stmt.test.is_none()
@@ -191,6 +213,7 @@ impl AstPrinter {
       return Ok(doc);
     }
 
+    self.push(AstParentKind::ForStmt(ForStmtField::Init));
     let init_doc = if let Some(init) = &for_stmt.init {
       match init {
         VarDeclOrExpr::VarDecl(var_decl) => self.print_var_decl(var_decl, true),
@@ -199,18 +222,25 @@ impl AstPrinter {
     } else {
       "".into()
     };
+    self.pop();
+
+    self.push(AstParentKind::ForStmt(ForStmtField::Test));
     let test_doc = for_stmt
       .test
       .as_ref()
       .map(|e| self.print_expr(&e))
       .transpose()?
       .unwrap_or_else(|| "".into());
+    self.pop();
+
+    self.push(AstParentKind::ForStmt(ForStmtField::Update));
     let update_doc = for_stmt
       .update
       .as_ref()
       .map(|e| self.print_expr(&e))
       .transpose()?
       .unwrap_or_else(|| "".into());
+    self.pop();
 
     let doc = Doc::new_group(
       Doc::new_concat(vec![
@@ -492,7 +522,7 @@ impl AstPrinter {
       Expr::Unary(_) => todo!(),
       Expr::Update(_) => todo!(),
       Expr::Bin(bin_expr) => print_bin_expr(self, bin_expr)?,
-      Expr::Assign(_) => todo!(),
+      Expr::Assign(assign_expr) => self.print_assign_expr(assign_expr)?,
       Expr::Member(member_expr) => self.print_member_expr(member_expr)?,
       Expr::SuperProp(super_props_expr) => todo!(),
       Expr::Cond(_) => todo!(),
@@ -508,7 +538,7 @@ impl AstPrinter {
       Expr::Yield(yield_expr) => self.print_yield_expr(yield_expr)?,
       Expr::MetaProp(_) => todo!(),
       Expr::Await(_) => todo!(),
-      Expr::Paren(_) => todo!(),
+      Expr::Paren(paren_expr) => self.print_expr(&paren_expr.expr)?,
       Expr::JSXMember(_) => todo!(),
       Expr::JSXNamespacedName(_) => todo!(),
       Expr::JSXEmpty(_) => todo!(),
@@ -728,6 +758,71 @@ impl AstPrinter {
     };
 
     Ok(Doc::new_concat(parts))
+  }
+
+  fn print_assign_expr(
+    &mut self,
+    assign_expr: &AssignExpr,
+  ) -> anyhow::Result<Doc> {
+    self.push(AstParentKind::AssignExpr(AssignExprField::Left));
+    let left_doc = match &assign_expr.left {
+      PatOrExpr::Expr(expr) => self.print_expr(&expr)?,
+      PatOrExpr::Pat(pat) => self.print_pat(&pat)?,
+    };
+    self.pop();
+
+    let op_doc =
+      Doc::new_concat(vec![" ".into(), assign_expr.op.as_str().into()]);
+
+    let is_assignment = true;
+
+    self.push(AstParentKind::AssignExpr(AssignExprField::Right));
+    let right_doc = self.print_expr(&assign_expr.right)?;
+    self.pop();
+
+    let should_break_after_operator = match assign_expr.right.as_ref() {
+      Expr::Array(array_lit) if array_lit.elems.len() > 0 => false,
+      Expr::Object(object_lit) if object_lit.props.len() > 0 => false,
+      _ => true,
+    };
+    if should_break_after_operator {
+      let doc = Doc::new_group(
+        Doc::new_concat(vec![
+          Doc::new_group(left_doc, false, None, None),
+          " =".into(),
+          Doc::new_group(
+            Doc::new_indent(Doc::new_concat(vec![Doc::line(), right_doc])),
+            false,
+            None,
+            None,
+          ),
+        ]),
+        false,
+        None,
+        None,
+      );
+      return Ok(doc);
+    }
+
+    let group_id = self.group_id("assignment");
+    let doc = Doc::new_group(
+      Doc::new_concat(vec![
+        Doc::new_group(left_doc, false, None, None),
+        " =".into(),
+        Doc::new_group(
+          Doc::new_indent(Doc::line()),
+          false,
+          None,
+          Some(group_id),
+        ),
+        // TODO lineSuffixBoundary
+        Doc::new_indent_if_break(right_doc, Some(group_id), false),
+      ]),
+      false,
+      None,
+      None,
+    );
+    Ok(doc)
   }
 
   fn print_member_expr(
