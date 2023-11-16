@@ -4,16 +4,20 @@ use swc_common::{
   comments::SingleThreadedComments, BytePos, SourceFile, Spanned,
 };
 use swc_ecma_ast::{
-  ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, FnDecl,
-  ForHead, ForOfStmt, ForStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem,
-  NewExpr, ObjectLit, Pat, Program, Prop, PropName, PropOrSpread, Stmt, Tpl,
-  VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator, YieldExpr,
+  ArrayLit, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread, ExprStmt, ForHead,
+  ForOfStmt, ForStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem, NewExpr,
+  ObjectLit, Pat, Program, Prop, PropName, PropOrSpread, Stmt, Tpl, VarDecl,
+  VarDeclKind, VarDeclOrExpr, VarDeclarator, YieldExpr,
 };
 
 use crate::{
   doc::{Doc, GroupId},
   doc_printer::{print_doc, string_width, DocWriter},
-  print_js::{bin_expr::print_bin_expr, comments::print_dangling_comments},
+  print_js::{
+    bin_expr::print_bin_expr,
+    comments::print_dangling_comments,
+    function::{print_arrow_expr, print_fn_decl, print_fn_expr},
+  },
 };
 
 pub struct AstPrinter {
@@ -66,7 +70,7 @@ impl AstPrinter {
       < self.src_file.lookup_line(next_lo).unwrap_or(0)
   }
 
-  fn group_id(&mut self, name: &'static str) -> GroupId {
+  pub fn group_id(&mut self, name: &'static str) -> GroupId {
     self.last_group_id += 1;
     GroupId(self.last_group_id, name)
   }
@@ -127,7 +131,7 @@ impl AstPrinter {
     }
   }
 
-  fn print_block_stmt(
+  pub fn print_block_stmt(
     &mut self,
     block_stmt: &BlockStmt,
     empty_hardline: bool,
@@ -283,7 +287,7 @@ impl AstPrinter {
   fn print_decl(&mut self, decl: &Decl) -> anyhow::Result<Doc> {
     match decl {
       Decl::Class(_) => todo!(),
-      Decl::Fn(fn_decl) => self.print_fn_decl(fn_decl),
+      Decl::Fn(fn_decl) => print_fn_decl(self, fn_decl),
       Decl::Var(var_decl) => self.print_var_decl(var_decl, false),
       Decl::Using(_) => todo!(),
       Decl::TsInterface(_) => todo!(),
@@ -291,48 +295,6 @@ impl AstPrinter {
       Decl::TsEnum(_) => todo!(),
       Decl::TsModule(_) => todo!(),
     }
-  }
-
-  fn print_fn_decl(&mut self, fn_decl: &FnDecl) -> anyhow::Result<Doc> {
-    let mut print_params = |fn_decl: &FnDecl| -> anyhow::Result<Doc> {
-      let params = &fn_decl.function.params;
-      if params.is_empty() {
-        return Ok(Doc::new_concat(vec!["(".into(), ")".into()]));
-      }
-
-      let mut printed = Vec::new();
-      let params_len = params.len();
-      for (i, param) in params.iter().enumerate() {
-        let is_last = i == params_len - 1;
-        printed.push(self.print_pat(&param.pat)?);
-        if !is_last {
-          printed.push(",".into());
-          printed.push(Doc::line());
-        }
-      }
-
-      Ok(Doc::new_concat(vec![
-        "(".into(),
-        Doc::new_indent(Doc::new_concat(
-          [&[Doc::softline()], printed.as_slice()].concat(),
-        )),
-        Doc::softline(),
-        ")".into(),
-      ]))
-    };
-
-    let mut parts = vec!["function ".into(), fn_decl.ident.sym.as_str().into()];
-
-    parts.push(Doc::new_group(print_params(fn_decl)?, false, None, None));
-
-    if let Some(body) = &fn_decl.function.body {
-      parts.push(" ".into());
-      parts.push(self.print_block_stmt(body, false)?);
-    }
-
-    let doc = Doc::new_concat(parts);
-
-    Ok(doc)
   }
 
   fn print_var_decl(
@@ -480,7 +442,7 @@ impl AstPrinter {
     }
   }
 
-  fn print_pat(&mut self, pat: &Pat) -> anyhow::Result<Doc> {
+  pub fn print_pat(&mut self, pat: &Pat) -> anyhow::Result<Doc> {
     let doc = match pat {
       Pat::Ident(ident) => {
         let mut parts = Vec::new();
@@ -526,7 +488,7 @@ impl AstPrinter {
       Expr::This(_this_expr) => "this".into(),
       Expr::Array(array_lit) => self.print_array_lit(array_lit)?,
       Expr::Object(object_lit) => self.print_object_lit(object_lit)?,
-      Expr::Fn(_) => todo!(),
+      Expr::Fn(fn_expr) => print_fn_expr(self, fn_expr)?,
       Expr::Unary(_) => todo!(),
       Expr::Update(_) => todo!(),
       Expr::Bin(bin_expr) => print_bin_expr(self, bin_expr)?,
@@ -541,7 +503,7 @@ impl AstPrinter {
       Expr::Lit(lit) => self.print_lit(lit)?,
       Expr::Tpl(tpl) => self.print_tpl(tpl)?,
       Expr::TaggedTpl(_) => todo!(),
-      Expr::Arrow(_) => todo!(),
+      Expr::Arrow(arrow_expr) => print_arrow_expr(self, arrow_expr)?,
       Expr::Class(_) => todo!(),
       Expr::Yield(yield_expr) => self.print_yield_expr(yield_expr)?,
       Expr::MetaProp(_) => todo!(),
