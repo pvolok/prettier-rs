@@ -16,6 +16,7 @@ use swc_ecma_visit::{
 };
 
 use crate::{
+  ast_path::Path,
   doc::{Doc, GroupId},
   doc_printer::{print_doc, string_width, DocWriter},
   print_js::{
@@ -58,18 +59,26 @@ impl AstPrinter {
 impl AstPrinter {
   pub fn print_program(&mut self, program: &Program) -> anyhow::Result<Doc> {
     match program {
-      Program::Module(module) => self.print_module(module),
+      Program::Module(module) => todo!(),
       Program::Script(_) => todo!(),
     }
   }
 
-  fn is_next_line_empty<T: Spanned>(&self, items: &[T], index: usize) -> bool {
-    let cur = if let Some(cur) = items.get(index) {
+  fn is_next_line_empty<T: Spanned>(
+    &self,
+    items: impl ExactSizeIterator<Item = T>,
+    index: usize,
+  ) -> bool {
+    let mut items = items.skip(index);
+    let cur = items.next();
+    let next = items.next();
+
+    let cur = if let Some(cur) = cur {
       cur
     } else {
       return false;
     };
-    let next = if let Some(next) = items.get(index + 1) {
+    let next = if let Some(next) = next {
       next
     } else {
       return false;
@@ -87,18 +96,22 @@ impl AstPrinter {
     GroupId(self.last_group_id, name)
   }
 
-  pub fn print_module(&mut self, module: &Module) -> anyhow::Result<Doc> {
+  pub fn print_module(
+    &mut self,
+    module: Path<'_, Module>,
+  ) -> anyhow::Result<Doc> {
     let mut contents = Vec::new();
 
-    let body_len = module.body.len();
-    for (i, module_item) in module.body.iter().enumerate() {
-      let item = self.print_module_item(module_item)?;
+    let body = module.body();
+    let body_len = body.len();
+    for (i, module_item) in body.iter().enumerate() {
+      let item = self.print_module_item(module_item.clone())?;
       contents.push(item);
 
       if i != body_len - 1 {
         contents.push(Doc::new_line(true, false, false));
 
-        if self.is_next_line_empty(&module.body, i) {
+        if self.is_next_line_empty(body.iter(), i) {
           contents.push(Doc::new_line(true, false, false));
         }
       }
@@ -111,9 +124,9 @@ impl AstPrinter {
 
   fn print_module_item(
     &mut self,
-    module_item: &ModuleItem,
+    module_item: Path<'_, ModuleItem>,
   ) -> anyhow::Result<Doc> {
-    match module_item {
+    match module_item.node {
       ModuleItem::ModuleDecl(_) => todo!(),
       ModuleItem::Stmt(stmt) => self.print_stmt(stmt),
     }
@@ -168,7 +181,7 @@ impl AstPrinter {
       body_parts.push(self.print_stmt(stmt)?);
       if !is_last {
         body_parts.push(Doc::hardline());
-        if self.is_next_line_empty(&block_stmt.stmts, i) {
+        if self.is_next_line_empty(block_stmt.stmts.iter(), i) {
           body_parts.push(Doc::hardline());
         }
       }
@@ -628,7 +641,7 @@ impl AstPrinter {
           elems_parts.push(Doc::new_concat(vec![elem_doc, comma]));
 
           if !is_last {
-            if self.is_next_line_empty(&array_lit.elems, i) {
+            if self.is_next_line_empty(array_lit.elems.iter(), i) {
               elems_parts
                 .push(Doc::new_concat(vec![Doc::hardline(), Doc::hardline()]));
             } else {
@@ -660,7 +673,7 @@ impl AstPrinter {
           if !is_last {
             elems_parts.push(",".into());
             elems_parts.push(Doc::line());
-            if self.is_next_line_empty(&array_lit.elems, i) {
+            if self.is_next_line_empty(array_lit.elems.iter(), i) {
               elems_parts.push(Doc::softline());
             }
           }
@@ -744,7 +757,8 @@ impl AstPrinter {
         }
         prop_parts.push(Doc::new_group(prop_doc, false, None, None));
 
-        is_prev_line_empty = self.is_next_line_empty(&object_lit.props, i);
+        is_prev_line_empty =
+          self.is_next_line_empty(object_lit.props.iter(), i);
 
         Ok(Doc::new_concat(prop_parts))
       })
@@ -948,7 +962,7 @@ impl AstPrinter {
         let doc = if !is_last {
           let mut parts = vec![doc, ",".into()];
 
-          if self.is_next_line_empty(args, i) {
+          if self.is_next_line_empty(args.iter(), i) {
             any_arg_empty_line = true;
             parts.push(Doc::hardline());
             parts.push(Doc::hardline());

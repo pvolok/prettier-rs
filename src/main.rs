@@ -7,8 +7,9 @@ use doc_printer::{print_doc, DocWriter};
 use swc_common::{comments::SingleThreadedComments, sync::Lrc, SourceMap};
 use swc_ecma_parser::EsConfig;
 
-use crate::{ast_printer::AstPrinter, ast_util::clean_ast};
+use crate::{ast_path::Path, ast_printer::AstPrinter, ast_util::clean_ast};
 
+mod ast_path;
 mod ast_printer;
 mod ast_util;
 mod doc;
@@ -38,10 +39,15 @@ fn main() {
   // Remove parens from ast
   let module_ast = clean_ast(module_ast);
 
+  let module_path = Path {
+    parent: None,
+    node: &module_ast,
+  };
+
   // println!("COMMENTS:\n{:#?}\n", comments);
 
   let mut printer = AstPrinter::new(src_file.clone(), comments);
-  let doc = printer.print_module(&module_ast).unwrap();
+  let doc = printer.print_module(module_path).unwrap();
 
   if std::env::var("DOC").is_ok() {
     println!("DOC:\n{:#?}\n", doc);
