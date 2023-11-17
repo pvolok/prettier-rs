@@ -332,8 +332,22 @@ pub fn print_doc(
           doc: contents,
         })
       }
-      Doc::LineSuffix(_) => todo!(),
-      Doc::LineSuffixBoundary => todo!(),
+      Doc::LineSuffix(doc) => {
+        line_suffix.push(Command {
+          ind: ind.clone(),
+          mode,
+          doc: doc.as_ref().clone(),
+        });
+      }
+      Doc::LineSuffixBoundary => {
+        if line_suffix.len() > 0 {
+          cmds.push(Command {
+            ind: ind.clone(),
+            mode,
+            doc: Doc::hardline_without_break_parent(),
+          });
+        }
+      }
       Doc::BreakParent => (),
       Doc::Trim => todo!(),
       Doc::Line {
@@ -398,7 +412,7 @@ fn fits(
   next: &Command,
   rest_commands: &[Command],
   mut width: i32,
-  has_line_suffix: bool,
+  mut has_line_suffix: bool,
   group_mode_map: &mut HashMap<GroupId, BreakMode>,
   must_be_flat: bool,
 ) -> bool {
@@ -464,8 +478,12 @@ fn fits(
         group_id,
         negate,
       } => cmds.push((mode, contents.as_ref().clone())),
-      Doc::LineSuffix(_) => todo!(),
-      Doc::LineSuffixBoundary => todo!(),
+      Doc::LineSuffix(_) => has_line_suffix = true,
+      Doc::LineSuffixBoundary => {
+        if has_line_suffix {
+          return false;
+        }
+      }
       Doc::BreakParent => todo!(),
       Doc::Trim => todo!(),
       Doc::Line {

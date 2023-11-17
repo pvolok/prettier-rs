@@ -127,6 +127,18 @@ impl Doc {
     }
   }
 
+  pub fn new_line_suffix_boundary() -> Self {
+    Doc::LineSuffixBoundary
+  }
+
+  pub fn hardline_without_break_parent() -> Self {
+    Doc::Line {
+      hard: true,
+      soft: false,
+      literal: false,
+    }
+  }
+
   pub fn line() -> Self {
     Doc::Line {
       hard: false,
@@ -179,6 +191,32 @@ impl Doc {
       ret.push(item);
     }
     ret
+  }
+
+  pub fn can_break(&self) -> bool {
+    match self {
+      Doc::Align(doc, _) => doc.can_break(),
+      Doc::Group { contents, .. } => contents.can_break(),
+      Doc::Fill { items, offset } => {
+        items.iter().skip(*offset).any(|item| item.can_break())
+      }
+      Doc::IfBreak {
+        break_doc,
+        flat_doc,
+        ..
+      } => break_doc.can_break() || flat_doc.can_break(),
+      Doc::Indent(doc) => doc.can_break(),
+      Doc::IndentIfBreak { contents, .. } => contents.can_break(),
+      Doc::LineSuffix(_) => todo!(),
+      Doc::LineSuffixBoundary => todo!(),
+      Doc::BreakParent => false,
+      Doc::Trim => false,
+      Doc::Line { .. } => true,
+      Doc::Cursor => false,
+      Doc::Label(_, doc) => doc.can_break(),
+      Doc::Text(_) => false,
+      Doc::Array(items) => items.iter().any(|item| item.can_break()),
+    }
   }
 }
 

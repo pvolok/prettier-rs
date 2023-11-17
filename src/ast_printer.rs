@@ -12,13 +12,14 @@ use swc_ecma_ast::{
 };
 use swc_ecma_visit::{
   fields::{AssignExprField, BlockStmtField, ForStmtField},
-  AstParentKind, AstParentNodeRef,
+  AstParentKind,
 };
 
 use crate::{
   doc::{Doc, GroupId},
   doc_printer::{print_doc, string_width, DocWriter},
   print_js::{
+    assign::{print_assignment, AssignmentLeft},
     bin_expr::print_bin_expr,
     comments::print_dangling_comments,
     function::{print_arrow_expr, print_fn_decl, print_fn_expr},
@@ -30,9 +31,10 @@ pub struct AstPrinter {
   comments: SingleThreadedComments,
   last_group_id: usize,
 
-  stack: Vec<AstParentKind>,
+  pub stack: Vec<AstParentKind>,
 
-  tab_width: i32,
+  pub tab_width: i32,
+  pub print_width: i32,
 }
 
 impl AstPrinter {
@@ -48,6 +50,7 @@ impl AstPrinter {
       stack: Vec::new(),
 
       tab_width: 2,
+      print_width: 80,
     }
   }
 }
@@ -533,7 +536,7 @@ impl AstPrinter {
       Expr::Lit(lit) => self.print_lit(lit)?,
       Expr::Tpl(tpl) => self.print_tpl(tpl)?,
       Expr::TaggedTpl(_) => todo!(),
-      Expr::Arrow(arrow_expr) => print_arrow_expr(self, arrow_expr)?,
+      Expr::Arrow(arrow_expr) => print_arrow_expr(self, arrow_expr, None)?,
       Expr::Class(_) => todo!(),
       Expr::Yield(yield_expr) => self.print_yield_expr(yield_expr)?,
       Expr::MetaProp(_) => todo!(),
@@ -773,6 +776,14 @@ impl AstPrinter {
 
     let op_doc =
       Doc::new_concat(vec![" ".into(), assign_expr.op.as_str().into()]);
+
+    return print_assignment(
+      self,
+      left_doc,
+      AssignmentLeft::PatOrExpr(&assign_expr.left),
+      op_doc,
+      &assign_expr.right,
+    );
 
     let is_assignment = true;
 

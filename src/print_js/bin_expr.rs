@@ -132,7 +132,7 @@ fn is_bitshift_op(op: BinaryOp) -> bool {
   }
 }
 
-fn should_inline_bin_expr(bin_expr: &BinExpr) -> bool {
+pub fn should_inline_bin_expr(bin_expr: &BinExpr) -> bool {
   match bin_expr.op {
     BinaryOp::LogicalOr | BinaryOp::LogicalAnd => (),
     _ => return false,
