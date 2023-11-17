@@ -5,10 +5,10 @@ use swc_common::{
 };
 use swc_ecma_ast::{
   ArrayLit, AssignExpr, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread,
-  ExprStmt, ForHead, ForOfStmt, ForStmt, Lit, MemberExpr, MemberProp, Module,
-  ModuleItem, NewExpr, ObjectLit, Pat, PatOrExpr, Program, Prop, PropName,
-  PropOrSpread, Stmt, Tpl, VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
-  YieldExpr,
+  ExprStmt, ForHead, ForOfStmt, ForStmt, IfStmt, Lit, MemberExpr, MemberProp,
+  Module, ModuleItem, NewExpr, ObjectLit, Pat, PatOrExpr, Program, Prop,
+  PropName, PropOrSpread, Stmt, TaggedTpl, Tpl, UnaryExpr, VarDecl,
+  VarDeclKind, VarDeclOrExpr, VarDeclarator, YieldExpr,
 };
 use swc_ecma_visit::{
   fields::{AssignExprField, BlockStmtField, ForStmtField},
@@ -137,7 +137,7 @@ impl AstPrinter {
       Stmt::Labeled(_) => todo!(),
       Stmt::Break(_) => todo!(),
       Stmt::Continue(_) => todo!(),
-      Stmt::If(_) => todo!(),
+      Stmt::If(if_stmt) => self.print_if_stmt(if_stmt),
       Stmt::Switch(_) => todo!(),
       Stmt::Throw(_) => todo!(),
       Stmt::Try(_) => todo!(),
@@ -187,6 +187,10 @@ impl AstPrinter {
     parts.push("}".into());
 
     Ok(Doc::new_concat(parts))
+  }
+
+  fn print_if_stmt(&mut self, if_stmt: &IfStmt) -> anyhow::Result<Doc> {
+    todo!()
   }
 
   fn print_for_stmt(&mut self, for_stmt: &ForStmt) -> anyhow::Result<Doc> {
@@ -487,7 +491,7 @@ impl AstPrinter {
       Pat::Object(_) => todo!(),
       Pat::Assign(_) => todo!(),
       Pat::Invalid(_) => todo!(),
-      Pat::Expr(_) => todo!(),
+      Pat::Expr(expr) => self.print_expr(&expr)?,
     };
 
     Ok(doc)
@@ -522,7 +526,7 @@ impl AstPrinter {
       Expr::Array(array_lit) => self.print_array_lit(array_lit)?,
       Expr::Object(object_lit) => self.print_object_lit(object_lit)?,
       Expr::Fn(fn_expr) => print_fn_expr(self, fn_expr)?,
-      Expr::Unary(_) => todo!(),
+      Expr::Unary(unary_expr) => self.print_unary_expr(unary_expr)?,
       Expr::Update(_) => todo!(),
       Expr::Bin(bin_expr) => print_bin_expr(self, bin_expr)?,
       Expr::Assign(assign_expr) => self.print_assign_expr(assign_expr)?,
@@ -535,7 +539,7 @@ impl AstPrinter {
       Expr::Ident(ident) => Doc::new_text(ident.sym.to_string()),
       Expr::Lit(lit) => self.print_lit(lit)?,
       Expr::Tpl(tpl) => self.print_tpl(tpl)?,
-      Expr::TaggedTpl(_) => todo!(),
+      Expr::TaggedTpl(tagged_tpl) => self.print_tagged_tpl(tagged_tpl)?,
       Expr::Arrow(arrow_expr) => print_arrow_expr(self, arrow_expr, None)?,
       Expr::Class(_) => todo!(),
       Expr::Yield(yield_expr) => self.print_yield_expr(yield_expr)?,
@@ -759,6 +763,28 @@ impl AstPrinter {
         "}".into(),
       ]
     };
+
+    Ok(Doc::new_concat(parts))
+  }
+
+  fn print_unary_expr(
+    &mut self,
+    unary_expr: &UnaryExpr,
+  ) -> anyhow::Result<Doc> {
+    let mut parts = Vec::new();
+
+    parts.push(unary_expr.op.as_str().into());
+
+    if unary_expr
+      .op
+      .as_str()
+      .chars()
+      .all(|c| c.is_ascii_alphabetic())
+    {
+      parts.push(" ".into());
+    }
+
+    parts.push(self.print_expr(&unary_expr.arg)?);
 
     Ok(Doc::new_concat(parts))
   }
@@ -1034,6 +1060,18 @@ impl AstPrinter {
     Ok(Doc::new_concat(parts))
   }
 
+  fn print_tagged_tpl(
+    &mut self,
+    tagged_tpl: &TaggedTpl,
+  ) -> anyhow::Result<Doc> {
+    let doc = Doc::new_concat(vec![
+      self.print_expr(&tagged_tpl.tag)?,
+      Doc::line_suffix_boundary(),
+      self.print_tpl(&tagged_tpl.tpl)?,
+    ]);
+    Ok(doc)
+  }
+
   fn print_yield_expr(
     &mut self,
     yield_expr: &YieldExpr,
@@ -1051,5 +1089,22 @@ impl AstPrinter {
     }
 
     Ok(Doc::new_concat(parts))
+  }
+
+  fn adjust_clause(
+    &mut self,
+    stmt: &Stmt,
+    clause: Doc,
+    force_space: bool,
+  ) -> Doc {
+    if stmt.is_empty() {
+      return ";".into();
+    }
+
+    if stmt.is_block() || force_space {
+      return Doc::new_concat(vec![" ".into(), clause]);
+    }
+
+    return Doc::new_indent(Doc::new_concat(vec![Doc::line(), clause]));
   }
 }
