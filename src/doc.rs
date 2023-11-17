@@ -42,7 +42,7 @@ pub enum Doc {
 #[derive(Clone, Debug)]
 pub enum DocAlign {
   Num(isize),
-  Str(Cow<'static, String>),
+  Str(Rc<str>),
   Root,
 }
 

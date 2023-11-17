@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashMap, fmt::Write, rc::Rc};
 
 use swc_common::SourceFile;
 
-use crate::doc::{Doc, GroupId};
+use crate::doc::{Doc, DocAlign, GroupId};
 
 pub enum DocWriter<'a> {
   String(&'a mut String),
@@ -40,9 +40,10 @@ enum BreakMode {
   Flat,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum IndentPart {
   Indent,
+  Align(DocAlign),
 }
 
 #[derive(Clone, Debug)]
@@ -51,6 +52,10 @@ struct Indent(Option<Rc<(IndentPart, Indent)>>);
 impl Indent {
   fn indent(&self) -> Indent {
     Indent(Some(Rc::new((IndentPart::Indent, self.clone()))))
+  }
+
+  fn align(&self, align: DocAlign) -> Indent {
+    Indent(Some(Rc::new((IndentPart::Align(align), self.clone()))))
   }
 
   fn width(&self) -> i32 {
@@ -62,6 +67,7 @@ impl Indent {
         IndentPart::Indent => {
           width += 2;
         }
+        _ => todo!(),
       }
       ind = parent;
     }
@@ -74,8 +80,23 @@ impl std::fmt::Display for Indent {
     match &self.0 {
       Some(ind) => {
         ind.1.fmt(f)?;
-        match ind.0 {
-          IndentPart::Indent => f.write_str("  ")?,
+        match &ind.0 {
+          IndentPart::Indent => {
+            f.write_str("  ")?;
+          }
+          IndentPart::Align(align) => {
+            match align {
+              DocAlign::Num(n) => {
+                for _ in 0..*n {
+                  f.write_char(' ')?;
+                }
+              }
+              DocAlign::Str(s) => {
+                f.write_str(s)?;
+              }
+              DocAlign::Root => todo!(),
+            };
+          }
         };
       }
       None => (),
@@ -109,7 +130,13 @@ pub fn print_doc(
 
   while let Some(Command { ind, mode, doc }) = cmds.pop() {
     match doc {
-      Doc::Align(_, _) => todo!(),
+      Doc::Align(doc, align) => {
+        cmds.push(Command {
+          ind: ind.align(align),
+          mode,
+          doc: doc.as_ref().clone(),
+        });
+      }
       Doc::Group {
         id,
         contents,
@@ -435,7 +462,9 @@ fn fits(
     };
 
     match doc {
-      Doc::Align(_, _) => todo!(),
+      Doc::Align(doc, _) => {
+        cmds.push((mode, doc.as_ref().clone()));
+      }
       Doc::Group {
         id,
         contents,

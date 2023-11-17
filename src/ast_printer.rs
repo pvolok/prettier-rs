@@ -16,7 +16,7 @@ use swc_ecma_visit::{
 };
 
 use crate::{
-  ast_path::Path,
+  ast_path::{fake_path, Path},
   doc::{Doc, GroupId},
   doc_printer::{print_doc, string_width, DocWriter},
   print_js::{
@@ -24,6 +24,7 @@ use crate::{
     bin_expr::print_bin_expr,
     comments::print_dangling_comments,
     function::{print_arrow_expr, print_fn_decl, print_fn_expr},
+    ternary::print_cond,
   },
 };
 
@@ -596,7 +597,7 @@ impl AstPrinter {
       Expr::Assign(assign_expr) => self.print_assign_expr(assign_expr)?,
       Expr::Member(member_expr) => self.print_member_expr(member_expr)?,
       Expr::SuperProp(super_props_expr) => todo!(),
-      Expr::Cond(_) => todo!(),
+      Expr::Cond(cond_expr) => print_cond(self, fake_path(cond_expr))?,
       Expr::Call(call_expr) => self.print_call_expr(call_expr)?,
       Expr::New(new_expr) => self.print_new_expr(new_expr)?,
       Expr::Seq(_) => todo!(),
