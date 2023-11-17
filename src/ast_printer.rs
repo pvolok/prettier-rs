@@ -203,7 +203,58 @@ impl AstPrinter {
   }
 
   fn print_if_stmt(&mut self, if_stmt: &IfStmt) -> anyhow::Result<Doc> {
-    todo!()
+    let cons_doc = self.print_stmt(&if_stmt.cons)?;
+    let cons = self.adjust_clause(&if_stmt.cons, cons_doc, false);
+
+    let opening = Doc::new_group(
+      Doc::new_concat(vec![
+        "if (".into(),
+        Doc::new_group(
+          Doc::new_concat(vec![
+            Doc::new_indent(Doc::new_concat(vec![
+              Doc::softline(),
+              self.print_expr(&if_stmt.test)?,
+            ])),
+            Doc::softline(),
+          ]),
+          false,
+          None,
+          None,
+        ),
+        ")".into(),
+        cons,
+      ]),
+      false,
+      None,
+      None,
+    );
+
+    let mut parts = Vec::new();
+
+    parts.push(opening);
+
+    if let Some(alt) = if_stmt.alt.as_ref() {
+      let comment_on_own_line = false;
+      let else_on_same_line = if_stmt.cons.is_block() && !comment_on_own_line;
+      if else_on_same_line {
+        parts.push(" ".into());
+      } else {
+        parts.push(Doc::hardline());
+      }
+
+      // TODO: comments
+
+      parts.push("else".into());
+      let alt_doc = self.print_stmt(&alt)?;
+      parts.push(Doc::new_group(
+        self.adjust_clause(&alt, alt_doc, alt.is_if_stmt()),
+        false,
+        None,
+        None,
+      ));
+    }
+
+    Ok(Doc::new_concat(parts))
   }
 
   fn print_for_stmt(&mut self, for_stmt: &ForStmt) -> anyhow::Result<Doc> {
