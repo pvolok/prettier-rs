@@ -152,17 +152,48 @@ impl AstPrinter {
   }
 
   fn print_stmt(&mut self, stmt: &Stmt) -> anyhow::Result<Doc> {
+    let semi = if self.semi { ";" } else { "" }.into();
+
     match stmt {
       Stmt::Block(block_stmt) => self.print_block_stmt(block_stmt, true),
-      Stmt::Empty(_) => todo!(),
-      Stmt::Debugger(_) => todo!(),
-      Stmt::With(_) => todo!(),
+      Stmt::Empty(_) => Ok("".into()),
+      Stmt::Debugger(_) => Ok(Doc::new_concat(vec!["debugger".into(), semi])),
+      Stmt::With(with_stmt) => {
+        let body_doc = self.print_stmt(&with_stmt.body)?;
+        Ok(Doc::new_group(
+          Doc::new_concat(vec![
+            "with (".into(),
+            self.print_expr(&with_stmt.obj)?,
+            ")".into(),
+            self.adjust_clause(with_stmt.body.as_ref(), body_doc, false),
+          ]),
+          false,
+          None,
+          None,
+        ))
+      }
       Stmt::Return(return_stmt) => {
         print_return_stmt(self, fake_path(return_stmt))
       }
       Stmt::Labeled(_) => todo!(),
-      Stmt::Break(_) => todo!(),
-      Stmt::Continue(_) => todo!(),
+      Stmt::Break(break_stmt) => {
+        let mut parts = vec!["break".into()];
+        if let Some(label) = &break_stmt.label {
+          parts.push(" ".into());
+          parts.push(Doc::new_text(label.to_string()));
+        }
+        parts.push(semi);
+        Ok(Doc::new_concat(parts))
+      }
+      Stmt::Continue(continue_stmt) => {
+        let mut parts = vec!["continue".into()];
+        if let Some(label) = &continue_stmt.label {
+          parts.push(" ".into());
+          parts.push(Doc::new_text(label.to_string()));
+        }
+        parts.push(semi);
+        Ok(Doc::new_concat(parts))
+      }
       Stmt::If(if_stmt) => self.print_if_stmt(if_stmt),
       Stmt::Switch(_) => todo!(),
       Stmt::Throw(throw_stmt) => print_throw_stmt(self, fake_path(throw_stmt)),
