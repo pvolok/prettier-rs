@@ -26,6 +26,7 @@ use crate::{
   print_js::{
     assign::{print_assignment, AssignmentLeft},
     bin_expr::print_bin_expr,
+    class::print_class_decl,
     comments::print_dangling_comments,
     function::{
       print_arrow_expr, print_fn_decl, print_fn_expr, print_return_stmt,
@@ -75,7 +76,7 @@ impl AstPrinter {
     }
   }
 
-  fn is_next_line_empty<T: Spanned>(
+  pub fn is_next_line_empty<T: Spanned>(
     &self,
     items: impl ExactSizeIterator<Item = T>,
     index: usize,
@@ -474,7 +475,7 @@ impl AstPrinter {
 
   fn print_decl(&mut self, decl: &Decl) -> anyhow::Result<Doc> {
     match decl {
-      Decl::Class(_) => todo!(),
+      Decl::Class(class_decl) => print_class_decl(self, class_decl),
       Decl::Fn(fn_decl) => print_fn_decl(self, fn_decl),
       Decl::Var(var_decl) => self.print_var_decl(var_decl, false),
       Decl::Using(_) => todo!(),

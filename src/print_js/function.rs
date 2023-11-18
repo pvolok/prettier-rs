@@ -23,14 +23,19 @@ pub fn print_fn_decl(
   cx: &mut AstPrinter,
   fn_decl: &FnDecl,
 ) -> anyhow::Result<Doc> {
-  print_function(cx, &fn_decl.function, Some(&fn_decl.ident))
+  let name_doc = Doc::new_text(fn_decl.ident.to_string());
+  print_function(cx, &fn_decl.function, Some(name_doc))
 }
 
 pub fn print_fn_expr(
   cx: &mut AstPrinter,
   fn_expr: &FnExpr,
 ) -> anyhow::Result<Doc> {
-  print_function(cx, &fn_expr.function, fn_expr.ident.as_ref())
+  let name_doc = fn_expr
+    .ident
+    .as_ref()
+    .map(|ident| Doc::new_text(ident.to_string()));
+  print_function(cx, &fn_expr.function, name_doc)
 }
 
 pub fn print_arrow_expr(
@@ -334,14 +339,14 @@ fn should_add_parens_if_not_break(body: &BlockStmtOrExpr) -> bool {
     && !starts_with_no_lookahead_token(expr, |expr| expr.is_object())
 }
 
-fn print_function(
+pub fn print_function(
   cx: &mut AstPrinter,
   function: &Function,
-  ident: Option<&Ident>,
+  ident: Option<Doc>,
 ) -> anyhow::Result<Doc> {
   let mut parts = vec!["function ".into()];
   if let Some(ident) = ident {
-    parts.push(ident.sym.as_str().into());
+    parts.push(ident);
   }
 
   parts.push(Doc::new_group(
