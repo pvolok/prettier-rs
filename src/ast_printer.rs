@@ -6,7 +6,7 @@ use swc_common::{
 use swc_ecma_ast::{
   ArrayLit, AssignExpr, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread,
   ExprStmt, ForHead, ForOfStmt, ForStmt, IfStmt, Lit, MemberExpr, MemberProp,
-  Module, ModuleItem, NewExpr, ObjectLit, ObjectPat, ObjectPatProp,
+  Module, ModuleItem, NewExpr, ObjectLit, ObjectPat, ObjectPatProp, OptCall,
   OptChainBase, Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread, SeqExpr,
   Stmt, TaggedTpl, Tpl, UnaryExpr, VarDecl, VarDeclKind, VarDeclOrExpr,
   VarDeclarator, YieldExpr,
@@ -654,7 +654,7 @@ impl AstPrinter {
             });
             self.print_member_expr(member_expr, opt_chain_expr.node.optional)?
           }
-          OptChainBase::Call(_) => todo!(),
+          OptChainBase::Call(opt_call) => self.print_opt_call(opt_call)?,
         }
       }
       Expr::Invalid(_) => todo!(),
@@ -1085,6 +1085,16 @@ impl AstPrinter {
     let args = self.print_call_expr_args(&call_expr.args)?;
 
     let doc = Doc::new_concat(vec![callee_doc, args]);
+
+    Ok(doc)
+  }
+
+  fn print_opt_call(&mut self, opt_call: &OptCall) -> anyhow::Result<Doc> {
+    let callee_doc = self.print_expr(&opt_call.callee)?;
+
+    let args = self.print_call_expr_args(&opt_call.args)?;
+
+    let doc = Doc::new_concat(vec![callee_doc, "?.".into(), args]);
 
     Ok(doc)
   }
