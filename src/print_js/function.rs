@@ -1,13 +1,17 @@
 use swc_ecma_ast::{
   ArrowExpr, BlockStmtOrExpr, Expr, FnDecl, FnExpr, Function, Ident, Param,
+  ReturnStmt, ThrowStmt,
 };
 use swc_ecma_visit::{
-  fields::{CallExprField, NewExprField},
+  fields::{CallExprField, NewExprField, ReturnStmtField, ThrowStmtField},
   AstParentKind,
 };
 
 use crate::{
-  ast_printer::AstPrinter, ast_util::starts_with_no_lookahead_token, doc::Doc,
+  ast_path::{ARef, Path},
+  ast_printer::AstPrinter,
+  ast_util::starts_with_no_lookahead_token,
+  doc::Doc,
 };
 
 use super::assign::AssignmentLayout;
@@ -365,4 +369,71 @@ fn print_params(cx: &mut AstPrinter, params: &[Param]) -> anyhow::Result<Doc> {
     Doc::softline(),
     ")".into(),
   ]))
+}
+
+pub fn print_return_stmt(
+  cx: &mut AstPrinter,
+  return_stmt: Path<ReturnStmt>,
+) -> anyhow::Result<Doc> {
+  let arg = return_stmt.sub_opt_box(
+    |p| p.arg.as_ref(),
+    |p, c| ARef::ReturnStmt(p, ReturnStmtField::Arg),
+  );
+
+  Ok(Doc::new_concat(vec![
+    "return".into(),
+    print_return_or_throw_argument(cx, arg)?,
+  ]))
+}
+
+pub fn print_throw_stmt(
+  cx: &mut AstPrinter,
+  throw_stmt: Path<ThrowStmt>,
+) -> anyhow::Result<Doc> {
+  let arg = throw_stmt
+    .sub(|p| (ARef::ThrowStmt(p, ThrowStmtField::Arg), p.arg.as_ref()));
+
+  Ok(Doc::new_concat(vec![
+    "throw".into(),
+    print_return_or_throw_argument(cx, Some(arg))?,
+  ]))
+}
+
+fn print_return_or_throw_argument(
+  cx: &mut AstPrinter,
+  arg: Option<Path<Expr>>,
+) -> anyhow::Result<Doc> {
+  let semi = if cx.semi { ";" } else { "" };
+
+  let mut parts = Vec::new();
+
+  if let Some(arg) = arg {
+    let arg_doc = cx.print_expr(arg.node)?;
+
+    let arg_doc = if arg.node.is_bin() || arg.node.is_seq() {
+      Doc::new_group(
+        Doc::new_concat(vec![
+          Doc::new_if_break("(".into(), "".into(), None),
+          Doc::new_indent(Doc::new_concat(vec![Doc::softline(), arg_doc])),
+          Doc::softline(),
+          Doc::new_if_break(")".into(), "".into(), None),
+        ]),
+        false,
+        None,
+        None,
+      )
+    } else {
+      arg_doc
+    };
+
+    parts.push(" ".into());
+    parts.push(arg_doc);
+  }
+
+  // TODO: comments
+  let should_print_semi_before_comments = false;
+
+  parts.push(semi.into());
+
+  Ok(Doc::new_concat(parts))
 }

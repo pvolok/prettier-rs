@@ -6,13 +6,16 @@ use swc_common::{
 use swc_ecma_ast::{
   ArrayLit, AssignExpr, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread,
   ExprStmt, ForHead, ForOfStmt, ForStmt, IfStmt, Lit, MemberExpr, MemberProp,
-  Module, ModuleItem, NewExpr, ObjectLit, ObjectPat, ObjectPatProp, Pat,
-  PatOrExpr, Program, Prop, PropName, PropOrSpread, SeqExpr, Stmt, TaggedTpl,
-  Tpl, UnaryExpr, VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
-  YieldExpr,
+  Module, ModuleItem, NewExpr, ObjectLit, ObjectPat, ObjectPatProp,
+  OptChainBase, Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread, SeqExpr,
+  Stmt, TaggedTpl, Tpl, UnaryExpr, VarDecl, VarDeclKind, VarDeclOrExpr,
+  VarDeclarator, YieldExpr,
 };
 use swc_ecma_visit::{
-  fields::{AssignExprField, BlockStmtField, ForStmtField, SeqExprField},
+  fields::{
+    AssignExprField, BlockStmtField, ForStmtField, OptChainBaseField,
+    OptChainExprField, SeqExprField,
+  },
   AstParentKind, AstParentNodeRef,
 };
 
@@ -24,7 +27,10 @@ use crate::{
     assign::{print_assignment, AssignmentLeft},
     bin_expr::print_bin_expr,
     comments::print_dangling_comments,
-    function::{print_arrow_expr, print_fn_decl, print_fn_expr},
+    function::{
+      print_arrow_expr, print_fn_decl, print_fn_expr, print_return_stmt,
+      print_throw_stmt,
+    },
     ternary::print_cond,
   },
 };
@@ -38,6 +44,7 @@ pub struct AstPrinter {
 
   pub tab_width: i32,
   pub print_width: i32,
+  pub semi: bool,
 }
 
 impl AstPrinter {
@@ -54,6 +61,7 @@ impl AstPrinter {
 
       tab_width: 2,
       print_width: 80,
+      semi: true,
     }
   }
 }
@@ -148,13 +156,15 @@ impl AstPrinter {
       Stmt::Empty(_) => todo!(),
       Stmt::Debugger(_) => todo!(),
       Stmt::With(_) => todo!(),
-      Stmt::Return(_) => todo!(),
+      Stmt::Return(return_stmt) => {
+        print_return_stmt(self, fake_path(return_stmt))
+      }
       Stmt::Labeled(_) => todo!(),
       Stmt::Break(_) => todo!(),
       Stmt::Continue(_) => todo!(),
       Stmt::If(if_stmt) => self.print_if_stmt(if_stmt),
       Stmt::Switch(_) => todo!(),
-      Stmt::Throw(_) => todo!(),
+      Stmt::Throw(throw_stmt) => print_throw_stmt(self, fake_path(throw_stmt)),
       Stmt::Try(_) => todo!(),
       Stmt::While(_) => todo!(),
       Stmt::DoWhile(_) => todo!(),
@@ -596,7 +606,9 @@ impl AstPrinter {
       Expr::Update(_) => todo!(),
       Expr::Bin(bin_expr) => print_bin_expr(self, bin_expr)?,
       Expr::Assign(assign_expr) => self.print_assign_expr(assign_expr)?,
-      Expr::Member(member_expr) => self.print_member_expr(member_expr)?,
+      Expr::Member(member_expr) => {
+        self.print_member_expr(fake_path(member_expr), false)?
+      }
       Expr::SuperProp(super_props_expr) => todo!(),
       Expr::Cond(cond_expr) => print_cond(self, fake_path(cond_expr))?,
       Expr::Call(call_expr) => self.print_call_expr(call_expr)?,
@@ -624,7 +636,27 @@ impl AstPrinter {
       Expr::TsInstantiation(_) => todo!(),
       Expr::TsSatisfies(_) => todo!(),
       Expr::PrivateName(_) => todo!(),
-      Expr::OptChain(_) => todo!(),
+      Expr::OptChain(opt_chain_expr) => {
+        let opt_chain_expr = fake_path(opt_chain_expr);
+        let base = opt_chain_expr.sub(|p| {
+          (
+            ARef::OptChainExpr(p, OptChainExprField::Base),
+            p.base.as_ref(),
+          )
+        });
+        match base.node {
+          OptChainBase::Member(member_expr) => {
+            let member_expr = base.sub(|p| {
+              (
+                ARef::OptChainBase(p, OptChainBaseField::Member),
+                member_expr,
+              )
+            });
+            self.print_member_expr(member_expr, opt_chain_expr.node.optional)?
+          }
+          OptChainBase::Call(_) => todo!(),
+        }
+      }
       Expr::Invalid(_) => todo!(),
     };
 
@@ -1006,22 +1038,27 @@ impl AstPrinter {
 
   fn print_member_expr(
     &mut self,
-    member_expr: &MemberExpr,
+    member_expr: Path<MemberExpr>,
+    optional: bool,
   ) -> anyhow::Result<Doc> {
-    let obj = self.print_expr(&member_expr.obj)?;
-    let lookup = match &member_expr.prop {
+    let obj = self.print_expr(&member_expr.node.obj)?;
+
+    let lookup = match &member_expr.node.prop {
       MemberProp::Ident(ident) => {
-        Doc::new_concat(vec![".".into(), ident.sym.as_str().into()])
+        let op = if optional { "?." } else { "." };
+        Doc::new_concat(vec![op.into(), ident.sym.as_str().into()])
       }
       MemberProp::PrivateName(_) => todo!(),
       MemberProp::Computed(prop) => {
+        let op = if optional { "?." } else { "" };
         let prop_doc = self.print_expr(&prop.expr)?;
         match prop.expr.as_ref() {
           Expr::Lit(Lit::Num(_)) => {
-            Doc::new_concat(vec!["[".into(), prop_doc, "]".into()])
+            Doc::new_concat(vec![op.into(), "[".into(), prop_doc, "]".into()])
           }
           _ => Doc::new_group(
             Doc::new_concat(vec![
+              op.into(),
               "[".into(),
               Doc::new_indent(Doc::new_concat(vec![Doc::softline(), prop_doc])),
               Doc::softline(),

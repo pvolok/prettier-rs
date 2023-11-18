@@ -67,6 +67,23 @@ impl<'a, N> Path<'a, N> {
     }
   }
 
+  pub fn sub_opt<T>(
+    &'a self,
+    get: impl Fn(&'a N) -> Option<&T>,
+    field: impl Fn(&'a N, &T) -> AstParentNodeRef<'a>,
+  ) -> Option<Path<'a, T>> {
+    get(self.node).map(|node| self.sub(|p| (field(p, node), node)))
+  }
+
+  pub fn sub_opt_box<T>(
+    &'a self,
+    get: impl Fn(&'a N) -> Option<&Box<T>>,
+    field: impl Fn(&'a N, &T) -> AstParentNodeRef<'a>,
+  ) -> Option<Path<'a, T>> {
+    get(self.node)
+      .map(|node| self.sub(|p| (field(p, node.as_ref()), node.as_ref())))
+  }
+
   pub fn sub_vec<T, R>(
     &'a self,
     arr: &'a [T],
@@ -80,6 +97,18 @@ impl<'a, N> Path<'a, N> {
         self.sub(|p| (node_ref, child))
       })
       .collect()
+  }
+
+  pub fn get_parent(&self, index: u32) -> Option<ARef> {
+    let mut parent = &self.parent;
+    for _ in 0..index {
+      parent = if let Some(parent) = parent.parent {
+        parent
+      } else {
+        return None;
+      }
+    }
+    Some(parent.node_ref)
   }
 }
 
