@@ -20,7 +20,12 @@ mod doc_printer;
 mod print_js;
 
 fn main() {
-  let es_config = EsConfig::default();
+  let es_config = EsConfig {
+    jsx: true,
+    fn_bind: true,
+    decorators: true,
+    ..Default::default()
+  };
 
   let mut errors = Vec::new();
 

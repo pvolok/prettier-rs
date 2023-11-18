@@ -8,8 +8,8 @@ use swc_ecma_ast::{
   ExprStmt, ForHead, ForOfStmt, ForStmt, IfStmt, Lit, MemberExpr, MemberProp,
   Module, ModuleItem, NewExpr, ObjectLit, ObjectPat, ObjectPatProp, OptCall,
   OptChainBase, Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread, SeqExpr,
-  Stmt, TaggedTpl, Tpl, UnaryExpr, VarDecl, VarDeclKind, VarDeclOrExpr,
-  VarDeclarator, YieldExpr,
+  Stmt, TaggedTpl, Tpl, UnaryExpr, UpdateExpr, VarDecl, VarDeclKind,
+  VarDeclOrExpr, VarDeclarator, YieldExpr,
 };
 use swc_ecma_visit::{
   fields::{
@@ -20,7 +20,7 @@ use swc_ecma_visit::{
 };
 
 use crate::{
-  ast_path::{fake_path, var, ARef, Path},
+  ast_path::{fake_path, sub_box, var, ARef, Path},
   doc::{Doc, GroupId},
   doc_printer::{print_doc, string_width, DocWriter},
   print_js::{
@@ -608,7 +608,9 @@ impl AstPrinter {
       Expr::Object(object_lit) => self.print_object_lit(object_lit)?,
       Expr::Fn(fn_expr) => print_fn_expr(self, fn_expr)?,
       Expr::Unary(unary_expr) => self.print_unary_expr(unary_expr)?,
-      Expr::Update(_) => todo!(),
+      Expr::Update(unpdate_expr) => {
+        self.print_update_expr(var!(expr, Expr, unpdate_expr, Update))?
+      }
       Expr::Bin(bin_expr) => print_bin_expr(self, bin_expr)?,
       Expr::Assign(assign_expr) => self.print_assign_expr(assign_expr)?,
       Expr::Member(member_expr) => {
@@ -985,6 +987,26 @@ impl AstPrinter {
     Ok(Doc::new_concat(parts))
   }
 
+  fn print_update_expr(
+    &mut self,
+    update_expr: Path<UpdateExpr>,
+  ) -> anyhow::Result<Doc> {
+    let mut parts = Vec::with_capacity(2);
+
+    if update_expr.node.prefix {
+      parts.push(update_expr.node.op.as_str().into());
+    }
+
+    let arg = sub_box!(update_expr, UpdateExpr, arg, Arg);
+    parts.push(self.print_expr_path(arg)?);
+
+    if !update_expr.node.prefix {
+      parts.push(update_expr.node.op.as_str().into());
+    }
+
+    Ok(Doc::new_concat(parts))
+  }
+
   fn print_assign_expr(
     &mut self,
     assign_expr: &AssignExpr,
@@ -1258,12 +1280,20 @@ impl AstPrinter {
 
   fn print_lit(&mut self, lit: &Lit) -> anyhow::Result<Doc> {
     let doc = match lit {
-      Lit::Str(str) => Doc::new_text(str.value.to_string()),
+      Lit::Str(str) => Doc::new_text(format!("\"{}\"", str.value)),
       Lit::Bool(bool) => Doc::new_text(format!("{:?}", bool)),
       Lit::Null(_) => Doc::new_text(format!("null")),
-      Lit::Num(num) => Doc::new_text(format!("{:?}", num.value)),
-      Lit::BigInt(_) => todo!(),
-      Lit::Regex(_) => todo!(),
+      Lit::Num(num) => {
+        let raw = num.raw.as_ref().unwrap();
+        Doc::new_text(format!("{}", raw))
+      }
+      Lit::BigInt(big_int) => Doc::new_text(big_int.raw.as_ref().map_or_else(
+        || String::new(),
+        |raw| raw.to_ascii_lowercase().to_string(),
+      )),
+      Lit::Regex(regex) => {
+        Doc::new_text(format!("/{}/{}", regex.exp, regex.flags))
+      }
       Lit::JSXText(_) => todo!(),
     };
 
