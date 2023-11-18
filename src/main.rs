@@ -49,12 +49,13 @@ fn main() {
   let doc = printer.print_module(module_path).unwrap();
 
   if std::env::var("DOC").is_ok() {
-    println!("DOC:\n{:#?}\n", doc);
+    // println!("DOC:\n{:#?}\n", doc);
   }
 
   let mut out_str = String::new();
   let mut out = DocWriter::String(&mut out_str);
   print_doc(&mut out, &src_file, &doc).unwrap();
 
-  println!("OUT:\n{}", out_str);
+  // println!("OUT:\n{}", out_str);
+  println!("{}", out_str);
 }

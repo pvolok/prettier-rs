@@ -37,8 +37,8 @@ pub fn print_assignment(
   let layout = choose_layout(cx, &left_doc, left, right);
 
   // dbg
-  let op_doc =
-    Doc::new_concat(vec![op_doc, format!("<{:?}>", layout).as_str().into()]);
+  // let op_doc =
+  //   Doc::new_concat(vec![op_doc, format!("<{:?}>", layout).as_str().into()]);
 
   let right_doc = match skip_parens(right) {
     Expr::Arrow(arrow_expr) => print_arrow_expr(cx, arrow_expr, Some(layout))?,

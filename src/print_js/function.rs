@@ -114,8 +114,6 @@ pub fn print_arrow_expr(
       == Some(AssignmentLayout::ChainTailArrowChain)
       || (is_callee && !should_put_body_on_same_line);
   }
-  println!("is_callee: {}", is_callee);
-  println!("assignment_layout: {:?}", assignment_layout);
   let sigs_doc = if should_indent_sigs {
     Doc::new_indent(Doc::new_concat(vec![Doc::softline(), sigs_doc]))
   } else {
@@ -124,10 +122,6 @@ pub fn print_arrow_expr(
 
   let body_doc =
     print_arrow_body(body_doc, body, should_put_body_on_same_line)?;
-
-  println!("should_print_as_chain: {}", should_print_as_chain);
-  println!("should_indent_sigs: {}", should_indent_sigs);
-  println!("should_break_sigs: {}", should_break_sigs);
 
   let doc = Doc::new_group(
     Doc::new_concat(vec![
