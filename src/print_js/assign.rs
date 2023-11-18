@@ -5,7 +5,10 @@ use swc_ecma_ast::{
 use swc_ecma_visit::AstParentKind;
 
 use crate::{
-  ast_printer::AstPrinter, ast_util::{is_lone_short_argument, skip_parens}, doc::Doc,
+  ast_path::fake_path,
+  ast_printer::AstPrinter,
+  ast_util::{is_lone_short_argument, skip_parens},
+  doc::Doc,
 };
 
 use super::{bin_expr::should_inline_bin_expr, function::print_arrow_expr};
@@ -41,7 +44,9 @@ pub fn print_assignment(
   //   Doc::new_concat(vec![op_doc, format!("<{:?}>", layout).as_str().into()]);
 
   let right_doc = match skip_parens(right) {
-    Expr::Arrow(arrow_expr) => print_arrow_expr(cx, arrow_expr, Some(layout))?,
+    Expr::Arrow(arrow_expr) => {
+      print_arrow_expr(cx, fake_path(arrow_expr), Some(layout))?
+    }
     _ => cx.print_expr(right)?,
   };
 

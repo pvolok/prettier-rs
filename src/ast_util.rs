@@ -58,7 +58,7 @@ pub fn is_lone_short_argument(cx: &mut AstPrinter, expr: &Expr) -> bool {
 
 pub fn starts_with_no_lookahead_token(
   expr: &Expr,
-  pred: fn(&Expr) -> bool,
+  pred: impl Fn(&Expr) -> bool,
 ) -> bool {
   match expr {
     Expr::Bin(bin_expr) => starts_with_no_lookahead_token(&bin_expr.left, pred),

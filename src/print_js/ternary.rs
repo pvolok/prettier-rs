@@ -2,7 +2,7 @@ use swc_ecma_ast::{CondExpr, MemberProp};
 use swc_ecma_visit::{fields::*, AstParentNodeRef};
 
 use crate::{
-  ast_path::Path,
+  ast_path::{sub_box, Path},
   ast_printer::AstPrinter,
   doc::{Doc, DocAlign},
 };
@@ -11,8 +11,8 @@ pub fn print_cond(
   cx: &mut AstPrinter,
   cond_expr: Path<CondExpr>,
 ) -> anyhow::Result<Doc> {
-  let cons = cond_expr.node.cons.as_ref();
-  let alt = cond_expr.node.alt.as_ref();
+  let cons = sub_box!(cond_expr, CondExpr, cons, Cons);
+  let alt = sub_box!(cond_expr, CondExpr, alt, Alt);
 
   let is_test = match cond_expr.parent.node_ref {
     AstParentNodeRef::CondExpr(_, field) => match field {
@@ -35,18 +35,18 @@ pub fn print_cond(
   if is_jsx {
     todo!()
   } else {
-    let cons_doc = cx.print_expr(&cons)?;
-    let alt_doc = cx.print_expr(&alt)?;
+    let cons_doc = cx.print_expr_path(cons.clone())?;
+    let alt_doc = cx.print_expr_path(alt)?;
     let part = Doc::new_concat(vec![
       Doc::line(),
       "? ".into(),
-      if cons.is_cond() {
+      if cons.node.is_cond() {
         Doc::new_if_break("".into(), "(".into(), None)
       } else {
         Doc::from("")
       },
       Doc::new_align(cons_doc, DocAlign::Num(2)),
-      if cons.is_cond() {
+      if cons.node.is_cond() {
         Doc::new_if_break("".into(), ")".into(), None)
       } else {
         Doc::from("")
@@ -181,7 +181,8 @@ fn print_ternary_test(
   cx: &mut AstPrinter,
   cond_expr: Path<CondExpr>,
 ) -> anyhow::Result<Doc> {
-  let test_doc = cx.print_expr(&cond_expr.node.test)?;
+  let test = sub_box!(cond_expr, CondExpr, test, Test);
+  let test_doc = cx.print_expr_path(test)?;
   /*
    *     a
    *       ? b

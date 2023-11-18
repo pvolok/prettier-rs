@@ -1,3 +1,4 @@
+#![feature(concat_idents)]
 #![feature(iter_intersperse)]
 #![feature(slice_take)]
 
@@ -49,7 +50,7 @@ fn main() {
   let doc = printer.print_module(module_path).unwrap();
 
   if std::env::var("DOC").is_ok() {
-    // println!("DOC:\n{:#?}\n", doc);
+    println!("DOC:\n{:#?}\n", doc);
   }
 
   let mut out_str = String::new();

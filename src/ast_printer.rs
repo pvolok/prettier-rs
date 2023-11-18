@@ -13,14 +13,14 @@ use swc_ecma_ast::{
 };
 use swc_ecma_visit::{
   fields::{
-    AssignExprField, BlockStmtField, ForStmtField, OptChainBaseField,
-    OptChainExprField, SeqExprField,
+    AssignExprField, BlockStmtField, ExprField, ForStmtField,
+    OptChainBaseField, OptChainExprField, SeqExprField,
   },
   AstParentKind, AstParentNodeRef,
 };
 
 use crate::{
-  ast_path::{fake_path, ARef, Path},
+  ast_path::{fake_path, var, ARef, Path},
   doc::{Doc, GroupId},
   doc_printer::{print_doc, string_width, DocWriter},
   print_js::{
@@ -31,6 +31,7 @@ use crate::{
       print_arrow_expr, print_fn_decl, print_fn_expr, print_return_stmt,
       print_throw_stmt,
     },
+    parens::needs_parens,
     ternary::print_cond,
   },
 };
@@ -597,7 +598,11 @@ impl AstPrinter {
   }
 
   pub fn print_expr(&mut self, expr: &Expr) -> anyhow::Result<Doc> {
-    let doc = match expr {
+    self.print_expr_path(fake_path(expr))
+  }
+
+  pub fn print_expr_path(&mut self, expr: Path<Expr>) -> anyhow::Result<Doc> {
+    let doc = match expr.node {
       Expr::This(_this_expr) => "this".into(),
       Expr::Array(array_lit) => self.print_array_lit(array_lit)?,
       Expr::Object(object_lit) => self.print_object_lit(object_lit)?,
@@ -610,7 +615,9 @@ impl AstPrinter {
         self.print_member_expr(fake_path(member_expr), false)?
       }
       Expr::SuperProp(super_props_expr) => todo!(),
-      Expr::Cond(cond_expr) => print_cond(self, fake_path(cond_expr))?,
+      Expr::Cond(cond_expr) => {
+        print_cond(self, var!(expr, Expr, cond_expr, Cond))?
+      }
       Expr::Call(call_expr) => self.print_call_expr(call_expr)?,
       Expr::New(new_expr) => self.print_new_expr(new_expr)?,
       Expr::Seq(seq_expr) => self.print_seq_expr(&fake_path(seq_expr))?,
@@ -618,7 +625,11 @@ impl AstPrinter {
       Expr::Lit(lit) => self.print_lit(lit)?,
       Expr::Tpl(tpl) => self.print_tpl(tpl)?,
       Expr::TaggedTpl(tagged_tpl) => self.print_tagged_tpl(tagged_tpl)?,
-      Expr::Arrow(arrow_expr) => print_arrow_expr(self, arrow_expr, None)?,
+      Expr::Arrow(arrow_expr) => print_arrow_expr(
+        self,
+        expr.sub(|p| (ARef::Expr(p, ExprField::Arrow), arrow_expr)),
+        None,
+      )?,
       Expr::Class(_) => todo!(),
       Expr::Yield(yield_expr) => self.print_yield_expr(yield_expr)?,
       Expr::MetaProp(_) => todo!(),
@@ -660,7 +671,18 @@ impl AstPrinter {
       Expr::Invalid(_) => todo!(),
     };
 
-    Ok(doc)
+    let mut parts = Vec::new();
+
+    let needs_parens = needs_parens(self, expr);
+    if needs_parens {
+      parts.push("(".into());
+    }
+    parts.push(doc);
+    if needs_parens {
+      parts.push(")".into());
+    }
+
+    Ok(Doc::new_concat(parts))
   }
 
   fn print_array_lit(&mut self, array_lit: &ArrayLit) -> anyhow::Result<Doc> {

@@ -3,12 +3,15 @@ use swc_ecma_ast::{
   ReturnStmt, ThrowStmt,
 };
 use swc_ecma_visit::{
-  fields::{CallExprField, NewExprField, ReturnStmtField, ThrowStmtField},
+  fields::{
+    ArrowExprField, BlockStmtOrExprField, CallExprField, ExprField,
+    NewExprField, ReturnStmtField, ThrowStmtField,
+  },
   AstParentKind,
 };
 
 use crate::{
-  ast_path::{ARef, Path},
+  ast_path::{sub_box, var, ARef, Path},
   ast_printer::AstPrinter,
   ast_util::starts_with_no_lookahead_token,
   doc::Doc,
@@ -32,10 +35,11 @@ pub fn print_fn_expr(
 
 pub fn print_arrow_expr(
   cx: &mut AstPrinter,
-  arrow_expr: &ArrowExpr,
+  arrow_expr: Path<ArrowExpr>,
   assignment_layout: Option<AssignmentLayout>,
 ) -> anyhow::Result<Doc> {
   let should_print_as_chain = arrow_expr
+    .node
     .body
     .as_expr()
     .map(|b| b.is_arrow())
@@ -45,19 +49,21 @@ pub fn print_arrow_expr(
     sig_docs: Vec<Doc>,
     should_break_chain: bool,
     should_print_as_chain: bool,
+    should_put_body_on_same_line: bool,
   }
   let mut vars = LocalVars {
     sig_docs: Vec::new(),
     should_break_chain: false,
     should_print_as_chain,
+    should_put_body_on_same_line: true,
   };
 
   fn rec<'a>(
     cx: &mut AstPrinter,
     vars: &mut LocalVars,
-    arrow_expr: &'a ArrowExpr,
-  ) -> anyhow::Result<(Doc, &'a BlockStmtOrExpr)> {
-    let sig_doc = print_arrow_sig(cx, arrow_expr)?;
+    arrow_expr: Path<'a, ArrowExpr>,
+  ) -> anyhow::Result<Doc> {
+    let sig_doc = print_arrow_sig(cx, arrow_expr.node)?;
 
     if vars.sig_docs.is_empty() {
       vars.sig_docs.push(sig_doc);
@@ -68,29 +74,42 @@ pub fn print_arrow_expr(
 
     if vars.should_print_as_chain {
       vars.should_break_chain = vars.should_break_chain
-        || arrow_expr.params.iter().any(|p| !p.is_ident());
+        || arrow_expr.node.params.iter().any(|p| !p.is_ident());
     }
 
-    match arrow_expr.body.as_ref() {
-      BlockStmtOrExpr::Expr(expr) => match expr.as_ref() {
-        Expr::Arrow(arrow_expr) => return rec(cx, vars, arrow_expr),
-        _ => (),
-      },
+    let body = sub_box!(arrow_expr, ArrowExpr, body, Body);
+
+    match body.node {
+      BlockStmtOrExpr::Expr(expr) => {
+        let expr = var!(body, BlockStmtOrExpr, expr.as_ref(), Expr);
+        match expr.node {
+          Expr::Arrow(arrow_expr) => {
+            let arrow_expr = var!(expr, Expr, arrow_expr, Arrow);
+            return rec(cx, vars, arrow_expr);
+          }
+          _ => (),
+        }
+      }
       _ => (),
     }
 
-    let doc = match arrow_expr.body.as_ref() {
+    let doc = match body.node {
       BlockStmtOrExpr::BlockStmt(block_stmt) => {
-        cx.print_block_stmt(block_stmt, false)
+        let block_stmt = var!(body, BlockStmtOrExpr, block_stmt, BlockStmt);
+        cx.print_block_stmt(block_stmt.node, false)?
       }
-      BlockStmtOrExpr::Expr(expr) => cx.print_expr(&expr),
-    }?;
+      BlockStmtOrExpr::Expr(expr) => {
+        let expr = var!(body, BlockStmtOrExpr, expr.as_ref(), Expr);
+        cx.print_expr_path(expr)?
+      }
+    };
 
-    Ok((doc, arrow_expr.body.as_ref()))
+    let doc =
+      print_arrow_body(doc, body.node, vars.should_put_body_on_same_line)?;
+
+    Ok(doc)
   }
-  let (body_doc, body) = rec(cx, &mut vars, arrow_expr)?;
-
-  let should_put_body_on_same_line = true;
+  let body_doc = rec(cx, &mut vars, arrow_expr)?;
 
   let is_callee = if let Some(parent) = cx.stack.last() {
     match parent {
@@ -116,16 +135,13 @@ pub fn print_arrow_expr(
     should_indent_sigs = true;
     should_break_sigs = assignment_layout
       == Some(AssignmentLayout::ChainTailArrowChain)
-      || (is_callee && !should_put_body_on_same_line);
+      || (is_callee && !vars.should_put_body_on_same_line);
   }
   let sigs_doc = if should_indent_sigs {
     Doc::new_indent(Doc::new_concat(vec![Doc::softline(), sigs_doc]))
   } else {
     sigs_doc
   };
-
-  let body_doc =
-    print_arrow_body(body_doc, body, should_put_body_on_same_line)?;
 
   let doc = Doc::new_group(
     Doc::new_concat(vec![
@@ -315,7 +331,7 @@ fn should_add_parens_if_not_break(body: &BlockStmtOrExpr) -> bool {
     BlockStmtOrExpr::Expr(expr) => expr,
   };
   expr.is_cond()
-    && starts_with_no_lookahead_token(expr, |expr| expr.is_object())
+    && !starts_with_no_lookahead_token(expr, |expr| expr.is_object())
 }
 
 fn print_function(

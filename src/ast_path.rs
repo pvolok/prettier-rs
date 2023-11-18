@@ -38,6 +38,32 @@ pub fn fake_path<'a, T>(node: &'a T) -> Path<'a, T> {
   }
 }
 
+macro_rules! var {
+  ($var:ident, $type:ident, $field:expr, $Field:ident) => {
+    $var.sub(|p| {
+      use swc_ecma_visit::fields::*;
+      (
+        crate::ast_path::ARef::$type(p, <concat_idents!($type, Field)>::$Field),
+        $field,
+      )
+    })
+  };
+}
+pub(crate) use var;
+
+macro_rules! sub_box {
+  ($var:ident, $type:ident, $field:ident, $Field:ident) => {
+    $var.sub(|p| {
+      use swc_ecma_visit::fields::*;
+      (
+        crate::ast_path::ARef::$type(p, <concat_idents!($type, Field)>::$Field),
+        p.$field.as_ref(),
+      )
+    })
+  };
+}
+pub(crate) use sub_box;
+
 impl<'a> Path<'a, ArrayLit> {
   pub fn elems(
     &'a self,
@@ -109,6 +135,24 @@ impl<'a, N> Path<'a, N> {
       }
     }
     Some(parent.node_ref)
+  }
+
+  pub fn find_ancestor<T>(
+    &'a self,
+    pred: impl Fn(ARef<'a>) -> Option<T>,
+  ) -> Option<T> {
+    let mut seg = &self.parent;
+    loop {
+      let result = pred(seg.node_ref);
+      if result.is_some() {
+        return result;
+      }
+      if let Some(parent) = seg.parent {
+        seg = parent;
+      } else {
+        return None;
+      }
+    }
   }
 }
 
