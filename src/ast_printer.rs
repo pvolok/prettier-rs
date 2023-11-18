@@ -6,17 +6,18 @@ use swc_common::{
 use swc_ecma_ast::{
   ArrayLit, AssignExpr, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread,
   ExprStmt, ForHead, ForOfStmt, ForStmt, IfStmt, Lit, MemberExpr, MemberProp,
-  Module, ModuleItem, NewExpr, ObjectLit, Pat, PatOrExpr, Program, Prop,
-  PropName, PropOrSpread, Stmt, TaggedTpl, Tpl, UnaryExpr, VarDecl,
-  VarDeclKind, VarDeclOrExpr, VarDeclarator, YieldExpr,
+  Module, ModuleItem, NewExpr, ObjectLit, ObjectPat, ObjectPatProp, Pat,
+  PatOrExpr, Program, Prop, PropName, PropOrSpread, SeqExpr, Stmt, TaggedTpl,
+  Tpl, UnaryExpr, VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
+  YieldExpr,
 };
 use swc_ecma_visit::{
-  fields::{AssignExprField, BlockStmtField, ForStmtField},
-  AstParentKind,
+  fields::{AssignExprField, BlockStmtField, ForStmtField, SeqExprField},
+  AstParentKind, AstParentNodeRef,
 };
 
 use crate::{
-  ast_path::{fake_path, Path},
+  ast_path::{fake_path, ARef, Path},
   doc::{Doc, GroupId},
   doc_printer::{print_doc, string_width, DocWriter},
   print_js::{
@@ -553,7 +554,7 @@ impl AstPrinter {
       }
       Pat::Array(_) => todo!(),
       Pat::Rest(_) => todo!(),
-      Pat::Object(_) => todo!(),
+      Pat::Object(object_pat) => self.print_object_pat(object_pat)?,
       Pat::Assign(_) => todo!(),
       Pat::Invalid(_) => todo!(),
       Pat::Expr(expr) => self.print_expr(&expr)?,
@@ -600,7 +601,7 @@ impl AstPrinter {
       Expr::Cond(cond_expr) => print_cond(self, fake_path(cond_expr))?,
       Expr::Call(call_expr) => self.print_call_expr(call_expr)?,
       Expr::New(new_expr) => self.print_new_expr(new_expr)?,
-      Expr::Seq(_) => todo!(),
+      Expr::Seq(seq_expr) => self.print_seq_expr(&fake_path(seq_expr))?,
       Expr::Ident(ident) => Doc::new_text(ident.sym.to_string()),
       Expr::Lit(lit) => self.print_lit(lit)?,
       Expr::Tpl(tpl) => self.print_tpl(tpl)?,
@@ -811,6 +812,81 @@ impl AstPrinter {
 
         is_prev_line_empty =
           self.is_next_line_empty(object_lit.props.iter(), i);
+
+        Ok(Doc::new_concat(prop_parts))
+      })
+      .collect::<anyhow::Result<Vec<Doc>>>()?;
+
+    let parts = if props.is_empty() {
+      vec!["{".into(), "}".into()]
+    } else {
+      vec![
+        "{".into(),
+        Doc::new_indent(Doc::new_concat(
+          [Doc::line()].into_iter().chain(props).collect(),
+        )),
+        Doc::new_if_break(",".into(), "".into(), None),
+        Doc::line(),
+        "}".into(),
+      ]
+    };
+
+    Ok(Doc::new_concat(parts))
+  }
+
+  fn print_object_pat(
+    &mut self,
+    object_pat: &ObjectPat,
+  ) -> anyhow::Result<Doc> {
+    let separator = Doc::from(",");
+
+    let mut is_prev_line_empty = false;
+
+    let props = object_pat
+      .props
+      .iter()
+      .enumerate()
+      .map(|(i, object_pat_prop)| {
+        let prop_doc = match object_pat_prop {
+          ObjectPatProp::KeyValue(key_value_prop) => {
+            let key: Doc = match &key_value_prop.key {
+              PropName::Ident(ident) => ident.sym.as_str().into(),
+              PropName::Str(_) => todo!(),
+              PropName::Num(_) => todo!(),
+              PropName::Computed(_) => todo!(),
+              PropName::BigInt(_) => todo!(),
+            };
+            let value = self.print_pat(&key_value_prop.value)?;
+
+            let group_id = self.group_id("assigment");
+            Doc::new_group(
+              Doc::new_concat(vec![
+                key,
+                ":".into(),
+                Doc::new_group(Doc::line(), false, None, Some(group_id)),
+                Doc::new_indent_if_break(value, Some(group_id), false),
+              ]),
+              false,
+              None,
+              None,
+            )
+          }
+          ObjectPatProp::Assign(_) => todo!(),
+          ObjectPatProp::Rest(_) => todo!(),
+        };
+
+        let mut prop_parts = Vec::new();
+        if i > 0 {
+          prop_parts.push(separator.clone());
+          prop_parts.push(Doc::line());
+          if is_prev_line_empty {
+            prop_parts.push(Doc::hardline());
+          }
+        }
+        prop_parts.push(Doc::new_group(prop_doc, false, None, None));
+
+        is_prev_line_empty =
+          self.is_next_line_empty(object_pat.props.iter(), i);
 
         Ok(Doc::new_concat(prop_parts))
       })
@@ -1063,6 +1139,51 @@ impl AstPrinter {
 
     let doc = Doc::new_concat(vec!["new ".into(), callee_doc, args]);
 
+    Ok(doc)
+  }
+
+  fn print_seq_expr(
+    &mut self,
+    seq_expr: &Path<SeqExpr>,
+  ) -> anyhow::Result<Doc> {
+    let exprs = seq_expr.sub_vec(seq_expr.node.exprs.as_ref(), |p, node, i| {
+      (ARef::SeqExpr(p, SeqExprField::Exprs(i)), node.as_ref())
+    });
+    match seq_expr.parent.node_ref {
+      AstParentNodeRef::ExprStmt(_, _) | AstParentNodeRef::ForStmt(_, _) => {
+        // For ExpressionStatements and for-loop heads, which are among
+        // the few places a SequenceExpression appears unparenthesized, we want
+        // to indent expressions after the first.
+        let mut parts = Vec::new();
+        for (i, expr) in exprs.iter().enumerate() {
+          let expr_doc = self.print_expr(expr.node)?;
+          if i == 0 {
+            parts.push(expr_doc);
+          } else {
+            parts.push(Doc::new_concat(vec![
+              ",".into(),
+              Doc::new_indent(Doc::new_concat(vec![Doc::line(), expr_doc])),
+            ]));
+          }
+        }
+        return Ok(Doc::new_group(Doc::new_concat(parts), false, None, None));
+      }
+      _ => (),
+    }
+
+    let doc = Doc::new_group(
+      Doc::new_concat(
+        exprs
+          .into_iter()
+          .map(|e| self.print_expr(e.node).ok())
+          .intersperse(Some(Doc::new_concat(vec![",".into(), Doc::line()])))
+          .collect::<Option<Vec<_>>>()
+          .unwrap_or_default(),
+      ),
+      false,
+      None,
+      None,
+    );
     Ok(doc)
   }
 

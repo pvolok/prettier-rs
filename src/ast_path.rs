@@ -1,16 +1,16 @@
-use swc_common::Spanned;
+use swc_common::{BytePos, Span, Spanned, SyntaxContext};
 use swc_ecma_ast::*;
 use swc_ecma_visit::{fields::*, AstParentNodeRef};
 
 #[derive(Clone, Copy)]
 pub struct PathSeg<'a> {
-  pub parent: &'a Option<PathSeg<'a>>,
+  pub parent: Option<&'a PathSeg<'a>>,
   pub node_ref: AstParentNodeRef<'a>,
 }
 
 #[derive(Clone, Copy)]
 pub struct Path<'a, N> {
-  pub parent: Option<PathSeg<'a>>,
+  pub parent: PathSeg<'a>,
   pub node: &'a N,
 }
 
@@ -20,8 +20,22 @@ impl<N: Spanned> Spanned for Path<'_, N> {
   }
 }
 
+const INVALID_NODE: Invalid = Invalid {
+  span: Span {
+    lo: BytePos::DUMMY,
+    hi: BytePos::DUMMY,
+    ctxt: SyntaxContext::empty(),
+  },
+};
+
 pub fn fake_path<'a, T>(node: &'a T) -> Path<'a, T> {
-  Path { parent: None, node }
+  Path {
+    parent: PathSeg {
+      parent: None,
+      node_ref: AstParentNodeRef::Invalid(&INVALID_NODE, InvalidField::Span),
+    },
+    node,
+  }
 }
 
 impl<'a> Path<'a, ArrayLit> {
@@ -29,44 +43,76 @@ impl<'a> Path<'a, ArrayLit> {
     &'a self,
   ) -> impl Iterator<Item = Option<Path<'a, ExprOrSpread>>> {
     self.node.elems.iter().enumerate().map(|(i, elem)| {
-      elem.as_ref().map(|elem| Path {
-        parent: Some(PathSeg {
-          parent: &self.parent,
-          node_ref: AstParentNodeRef::ArrayLit(
-            self.node,
-            ArrayLitField::Elems(i),
-          ),
-        }),
-        node: elem,
+      elem.as_ref().map(|elem| {
+        self.sub(|p| {
+          (AstParentNodeRef::ArrayLit(p, ArrayLitField::Elems(i)), elem)
+        })
       })
     })
   }
 }
 
+impl<'a, N> Path<'a, N> {
+  pub fn sub<T>(
+    &'a self,
+    f: impl Fn(&'a N) -> (AstParentNodeRef, &T),
+  ) -> Path<'a, T> {
+    let (node_ref, child) = f(self.node);
+    Path {
+      parent: PathSeg {
+        parent: Some(&self.parent),
+        node_ref,
+      },
+      node: child,
+    }
+  }
+
+  pub fn sub_vec<T, R>(
+    &'a self,
+    arr: &'a [T],
+    f: impl Fn(&'a N, &'a T, usize) -> (AstParentNodeRef<'a>, &'a R),
+  ) -> Vec<Path<'a, R>> {
+    arr
+      .into_iter()
+      .enumerate()
+      .map(|(i, item)| {
+        let (node_ref, child) = f(self.node, item, i);
+        self.sub(|p| (node_ref, child))
+      })
+      .collect()
+  }
+}
+
 fn from_val<'a, T>(
-  parent: &'a Option<PathSeg<'a>>,
+  parent: &'a PathSeg<'a>,
   node: &'a T,
   node_ref: AstParentNodeRef<'a>,
 ) -> Path<'a, T> {
   Path {
-    parent: Some(PathSeg { parent, node_ref }),
+    parent: PathSeg {
+      parent: Some(parent),
+      node_ref,
+    },
     node,
   }
 }
 
 fn from_opt<'a, T>(
-  parent: &'a Option<PathSeg<'a>>,
+  parent: &'a PathSeg<'a>,
   node: &'a Option<T>,
   node_ref: AstParentNodeRef<'a>,
 ) -> Option<Path<'a, T>> {
   node.as_ref().map(|node| Path {
-    parent: Some(PathSeg { parent, node_ref }),
+    parent: PathSeg {
+      parent: Some(parent),
+      node_ref,
+    },
     node,
   })
 }
 
 fn from_vec<'a, T, F: Fn(usize) -> AstParentNodeRef<'a>>(
-  parent: &'a Option<PathSeg<'a>>,
+  parent: &'a PathSeg<'a>,
   vec: &'a [T],
   make_ref: F,
 ) -> Vec<Path<'a, T>> {
@@ -74,10 +120,10 @@ fn from_vec<'a, T, F: Fn(usize) -> AstParentNodeRef<'a>>(
     .iter()
     .enumerate()
     .map(move |(i, node)| Path {
-      parent: Some(PathSeg {
-        parent,
+      parent: PathSeg {
+        parent: Some(parent),
         node_ref: make_ref(i),
-      }),
+      },
       node,
     })
     .collect()
@@ -119,25 +165,15 @@ impl<'a> Path<'a, BinExpr> {
   }
 }
 
+pub type ARef<'a> = AstParentNodeRef<'a>;
+
 impl<'a> Path<'a, UnaryExpr> {
   pub fn op(&'a self) -> Path<'a, UnaryOp> {
-    Path {
-      parent: Some(PathSeg {
-        parent: &self.parent,
-        node_ref: AstParentNodeRef::UnaryExpr(self.node, UnaryExprField::Op),
-      }),
-      node: &self.node.op,
-    }
+    self.sub(|p| (ARef::UnaryExpr(p, UnaryExprField::Op), &p.op))
   }
 
   pub fn arg(&'a self) -> Path<'a, Expr> {
-    Path {
-      parent: Some(PathSeg {
-        parent: &self.parent,
-        node_ref: AstParentNodeRef::UnaryExpr(self.node, UnaryExprField::Arg),
-      }),
-      node: self.node.arg.as_ref(),
-    }
+    self.sub(|p| (ARef::UnaryExpr(p, UnaryExprField::Arg), p.arg.as_ref()))
   }
 }
 
@@ -195,35 +231,10 @@ impl Path<'_, Param> {
 
 impl<'a> Path<'a, UpdateExpr> {
   pub fn op(&'a self) -> Path<'a, UpdateOp> {
-    Path {
-      parent: Some(PathSeg {
-        parent: &self.parent,
-        node_ref: AstParentNodeRef::UpdateExpr(self.node, UpdateExprField::Op),
-      }),
-      node: &self.node.op,
-    }
+    self.sub(|p| (ARef::UpdateExpr(p, UpdateExprField::Op), &p.op))
   }
 
   pub fn arg(&'a self) -> Path<'a, Expr> {
-    Path {
-      parent: Some(PathSeg {
-        parent: &self.parent,
-        node_ref: AstParentNodeRef::UpdateExpr(self.node, UpdateExprField::Arg),
-      }),
-      node: self.node.arg.as_ref(),
-    }
-  }
-
-  pub fn prefix(&'a self) -> Path<'a, bool> {
-    Path {
-      parent: Some(PathSeg {
-        parent: &self.parent,
-        node_ref: AstParentNodeRef::UpdateExpr(
-          self.node,
-          UpdateExprField::Prefix,
-        ),
-      }),
-      node: &self.node.prefix,
-    }
+    self.sub(|p| (ARef::UpdateExpr(p, UpdateExprField::Arg), p.arg.as_ref()))
   }
 }

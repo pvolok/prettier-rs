@@ -14,27 +14,19 @@ pub fn print_cond(
   let cons = cond_expr.node.cons.as_ref();
   let alt = cond_expr.node.alt.as_ref();
 
-  let is_test = if let Some(parent) = cond_expr.parent {
-    match parent.node_ref {
-      AstParentNodeRef::CondExpr(_, field) => match field {
-        CondExprField::Test => true,
-        _ => false,
-      },
+  let is_test = match cond_expr.parent.node_ref {
+    AstParentNodeRef::CondExpr(_, field) => match field {
+      CondExprField::Test => true,
       _ => false,
-    }
-  } else {
-    false
+    },
+    _ => false,
   };
-  let force_no_indent = if let Some(parent) = cond_expr.parent {
-    match parent.node_ref {
-      AstParentNodeRef::CondExpr(_, field) => match field {
-        CondExprField::Test => false,
-        _ => true,
-      },
-      _ => false,
-    }
-  } else {
-    false
+  let force_no_indent = match cond_expr.parent.node_ref {
+    AstParentNodeRef::CondExpr(_, field) => match field {
+      CondExprField::Test => false,
+      _ => true,
+    },
+    _ => false,
   };
 
   let mut parts = Vec::new();
@@ -64,15 +56,13 @@ pub fn print_cond(
       Doc::new_align(alt_doc, DocAlign::Num(2)),
     ]);
 
-    let doc = if cond_expr
-      .parent
-      .map_or(true, |parent| match parent.node_ref {
-        AstParentNodeRef::CondExpr(_, field) => match field {
-          CondExprField::Test | CondExprField::Alt => true,
-          _ => false,
-        },
-        _ => true,
-      }) {
+    let doc = if match cond_expr.parent.node_ref {
+      AstParentNodeRef::CondExpr(_, field) => match field {
+        CondExprField::Test | CondExprField::Alt => true,
+        _ => false,
+      },
+      _ => true,
+    } {
       part
     } else {
       Doc::new_align(part, DocAlign::Num((cx.tab_width - 2).max(0) as _))
@@ -84,9 +74,7 @@ pub fn print_cond(
   let should_break = false;
 
   let maybe_group = |doc| {
-    if cond_expr.parent.map_or(true, |p| {
-      !matches!(p.node_ref, AstParentNodeRef::CondExpr(_, _))
-    }) {
+    if !matches!(cond_expr.parent.node_ref, AstParentNodeRef::CondExpr(_, _)) {
       Doc::new_group(doc, should_break, None, None)
     } else if should_break {
       Doc::new_concat(vec![doc, Doc::break_parent()])
@@ -101,17 +89,12 @@ pub fn print_cond(
   //   : c
   // ).call()
   let break_closing_paren = !is_jsx
-    && match &cond_expr.parent {
-      Some(parent) => match &parent.node_ref {
-        AstParentNodeRef::MemberExpr(member_expr, _) => {
-          match member_expr.prop {
-            MemberProp::Computed(_) => false,
-            _ => true,
-          }
-        }
-        _ => false,
+    && match &cond_expr.parent.node_ref {
+      AstParentNodeRef::MemberExpr(member_expr, _) => match member_expr.prop {
+        MemberProp::Computed(_) => false,
+        _ => true,
       },
-      None => false,
+      _ => false,
     };
 
   let should_extra_indent =
@@ -150,19 +133,27 @@ pub fn print_cond(
 fn should_extra_indent_for_conditional_expression(
   expr: &Path<CondExpr>,
 ) -> bool {
-  let mut parent = expr.parent.as_ref();
+  let mut parent = &expr.parent;
   let mut direct = true;
-  while let Some(parent_) = parent {
-    match parent_.node_ref {
+  loop {
+    match parent.node_ref {
       AstParentNodeRef::CallExpr(_, CallExprField::Callee)
       | AstParentNodeRef::MemberExpr(_, MemberExprField::Obj) => {
-        parent = parent_.parent.as_ref();
         direct = false;
+        parent = if let Some(p) = parent.parent {
+          p
+        } else {
+          break;
+        };
       }
 
       AstParentNodeRef::NewExpr(_, NewExprField::Callee) => {
-        parent = parent_.parent.as_ref();
         direct = false;
+        parent = if let Some(p) = parent.parent {
+          p
+        } else {
+          break;
+        };
         break;
       }
 
@@ -174,12 +165,6 @@ fn should_extra_indent_for_conditional_expression(
   if direct {
     return false;
   }
-
-  let parent = if let Some(parent) = parent {
-    parent
-  } else {
-    return false;
-  };
 
   match parent.node_ref {
     AstParentNodeRef::AssignExpr(_, AssignExprField::Right) => true,
@@ -207,13 +192,11 @@ fn print_ternary_test(
    *       ? d
    *       : e
    */
-  if let Some(parent) = cond_expr.parent {
-    match parent.node_ref {
-      AstParentNodeRef::CondExpr(_, CondExprField::Alt) => {
-        return Ok(Doc::new_align(test_doc, DocAlign::Num(2)));
-      }
-      _ => (),
+  match cond_expr.parent.node_ref {
+    AstParentNodeRef::CondExpr(_, CondExprField::Alt) => {
+      return Ok(Doc::new_align(test_doc, DocAlign::Num(2)));
     }
+    _ => (),
   }
   Ok(test_doc)
 }
