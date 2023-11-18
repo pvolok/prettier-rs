@@ -4,12 +4,12 @@ use swc_common::{
   comments::SingleThreadedComments, BytePos, SourceFile, Spanned,
 };
 use swc_ecma_ast::{
-  ArrayLit, AssignExpr, BlockStmt, CallExpr, Decl, Expr, ExprOrSpread,
-  ExprStmt, ForHead, ForOfStmt, ForStmt, IfStmt, Lit, MemberExpr, MemberProp,
-  Module, ModuleItem, NewExpr, ObjectLit, ObjectPat, ObjectPatProp, OptCall,
-  OptChainBase, Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread, SeqExpr,
-  Stmt, TaggedTpl, Tpl, UnaryExpr, UpdateExpr, VarDecl, VarDeclKind,
-  VarDeclOrExpr, VarDeclarator, YieldExpr,
+  ArrayLit, AssignExpr, BlockStmt, CallExpr, CatchClause, Decl, Expr,
+  ExprOrSpread, ExprStmt, ForHead, ForOfStmt, ForStmt, IfStmt, Lit, MemberExpr,
+  MemberProp, Module, ModuleItem, NewExpr, ObjectLit, ObjectPat, ObjectPatProp,
+  OptCall, OptChainBase, Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread,
+  SeqExpr, Stmt, TaggedTpl, Tpl, TryStmt, UnaryExpr, UpdateExpr, VarDecl,
+  VarDeclKind, VarDeclOrExpr, VarDeclarator, YieldExpr,
 };
 use swc_ecma_visit::{
   fields::{
@@ -197,7 +197,7 @@ impl AstPrinter {
       Stmt::If(if_stmt) => self.print_if_stmt(if_stmt),
       Stmt::Switch(_) => todo!(),
       Stmt::Throw(throw_stmt) => print_throw_stmt(self, fake_path(throw_stmt)),
-      Stmt::Try(_) => todo!(),
+      Stmt::Try(try_stmt) => self.print_try_stmt(try_stmt.as_ref()),
       Stmt::While(_) => todo!(),
       Stmt::DoWhile(_) => todo!(),
       Stmt::For(for_stmt) => self.print_for_stmt(for_stmt),
@@ -299,6 +299,49 @@ impl AstPrinter {
     }
 
     Ok(Doc::new_concat(parts))
+  }
+
+  fn print_try_stmt(&mut self, try_stmt: &TryStmt) -> anyhow::Result<Doc> {
+    let mut parts =
+      vec!["try ".into(), self.print_block_stmt(&try_stmt.block, true)?];
+    if let Some(handler) = &try_stmt.handler {
+      parts.push(Doc::new_concat(vec![
+        " ".into(),
+        self.print_catch_clause(&handler)?,
+      ]));
+    }
+    if let Some(finalizer) = &try_stmt.finalizer {
+      parts.push(Doc::new_concat(vec![
+        " finally ".into(),
+        self.print_block_stmt(&finalizer, true)?,
+      ]));
+    }
+    Ok(Doc::new_concat(parts))
+  }
+
+  fn print_catch_clause(
+    &mut self,
+    catch_clause: &CatchClause,
+  ) -> anyhow::Result<Doc> {
+    if let Some(param) = &catch_clause.param {
+      let parameter_has_comments = false;
+      let param_doc = self.print_pat(&param)?;
+
+      return Ok(Doc::new_concat(vec![
+        "catch ".into(),
+        Doc::new_concat(if parameter_has_comments {
+          todo!()
+        } else {
+          vec!["(".into(), param_doc, ") ".into()]
+        }),
+        self.print_block_stmt(&catch_clause.body, true)?,
+      ]));
+    }
+
+    Ok(Doc::new_concat(vec![
+      "catch ".into(),
+      self.print_block_stmt(&catch_clause.body, true)?,
+    ]))
   }
 
   fn print_for_stmt(&mut self, for_stmt: &ForStmt) -> anyhow::Result<Doc> {
