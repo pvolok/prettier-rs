@@ -4,7 +4,7 @@ use swc_common::{
   comments::SingleThreadedComments, BytePos, SourceFile, Spanned,
 };
 use swc_ecma_ast::{
-  ArrayLit, AssignExpr, BigInt, BlockStmt, CallExpr, CatchClause,
+  ArrayLit, AssignExpr, AwaitExpr, BigInt, BlockStmt, CallExpr, CatchClause,
   ComputedPropName, Decl, Expr, ExprOrSpread, ExprStmt, ForHead, ForOfStmt,
   ForStmt, Ident, IfStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem,
   NewExpr, Number, ObjectLit, ObjectPat, ObjectPatProp, OptCall, OptChainBase,
@@ -27,7 +27,7 @@ use crate::{
   print_js::{
     assign::{print_assignment, AssignmentLeft},
     bin_expr::print_bin_expr,
-    class::print_class_decl,
+    class::{print_class_decl, print_class_expr},
     comments::print_dangling_comments,
     function::{
       print_arrow_expr, print_fn_decl, print_fn_expr, print_return_stmt,
@@ -710,10 +710,10 @@ impl AstPrinter {
         expr.sub(|p| (ARef::Expr(p, ExprField::Arrow), arrow_expr)),
         None,
       )?,
-      Expr::Class(_) => todo!(),
+      Expr::Class(class_expr) => print_class_expr(self, class_expr)?,
       Expr::Yield(yield_expr) => self.print_yield_expr(yield_expr)?,
       Expr::MetaProp(_) => todo!(),
-      Expr::Await(_) => todo!(),
+      Expr::Await(await_expr) => self.print_await_expr(await_expr)?,
       Expr::Paren(paren_expr) => self.print_expr(&paren_expr.expr)?,
       Expr::JSXMember(_) => todo!(),
       Expr::JSXNamespacedName(_) => todo!(),
@@ -1493,6 +1493,21 @@ impl AstPrinter {
       parts.push(" ".into());
       parts.push(self.print_expr(&arg)?);
     }
+
+    Ok(Doc::new_concat(parts))
+  }
+
+  fn print_await_expr(
+    &mut self,
+    await_expr: &AwaitExpr,
+  ) -> anyhow::Result<Doc> {
+    let mut parts = Vec::new();
+    parts.push("await".into());
+
+    parts.push(" ".into());
+    parts.push(self.print_expr(&await_expr.arg)?);
+
+    // TODO: handle if in call or member
 
     Ok(Doc::new_concat(parts))
   }

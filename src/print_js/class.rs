@@ -1,6 +1,6 @@
 use swc_ecma_ast::{
-  Class, ClassDecl, ClassMember, ClassMethod, ClassProp, Expr, Function,
-  MethodKind, PrivateMethod, PropName,
+  Class, ClassDecl, ClassExpr, ClassMember, ClassMethod, ClassProp, Expr,
+  Function, Ident, MethodKind, PrivateMethod, PropName,
 };
 
 use crate::{
@@ -14,6 +14,21 @@ pub fn print_class_decl(
   cx: &mut AstPrinter,
   class_decl: &ClassDecl,
 ) -> anyhow::Result<Doc> {
+  print_class_decl_or_expr(cx, Some(&class_decl.ident), &class_decl.class)
+}
+
+pub fn print_class_expr(
+  cx: &mut AstPrinter,
+  class_expr: &ClassExpr,
+) -> anyhow::Result<Doc> {
+  print_class_decl_or_expr(cx, class_expr.ident.as_ref(), &class_expr.class)
+}
+
+pub fn print_class_decl_or_expr(
+  cx: &mut AstPrinter,
+  ident: Option<&Ident>,
+  class: &Class,
+) -> anyhow::Result<Doc> {
   let mut parts = vec!["class".into()];
 
   let group_mode = false;
@@ -21,10 +36,12 @@ pub fn print_class_decl(
   let mut parts_group = Vec::new();
   let mut extends_parts = Vec::new();
 
-  parts_group.push(" ".into());
-  parts_group.push(Doc::new_text(class_decl.ident.sym.to_string()));
+  if let Some(ident) = ident {
+    parts_group.push(" ".into());
+    parts_group.push(Doc::new_text(ident.sym.to_string()));
+  }
 
-  if let Some(super_class) = &class_decl.class.super_class {
+  if let Some(super_class) = &class.super_class {
     // TODO: See printSuperClass()
     let super_class_doc =
       Doc::new_concat(vec!["extends ".into(), cx.print_expr(&super_class)?]);
@@ -46,7 +63,7 @@ pub fn print_class_decl(
   }
 
   parts.push(" ".into());
-  parts.push(print_class(cx, &class_decl.class)?);
+  parts.push(print_class(cx, class)?);
 
   Ok(Doc::new_concat(parts))
 }
