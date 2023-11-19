@@ -1,8 +1,16 @@
-use swc_ecma_ast::{Class, ClassDecl, ClassMember, PropName};
+use std::rc::Rc;
 
-use crate::{ast_printer::AstPrinter, doc::Doc};
+use swc_ecma_ast::{
+  Class, ClassDecl, ClassMember, ClassMethod, ClassProp, Function, MethodKind,
+  PropName,
+};
 
-use super::function::print_function;
+use crate::{
+  ast_printer::AstPrinter,
+  doc::{Doc, RDoc},
+};
+
+use super::{assign::print_assignment, function::print_params};
 
 pub fn print_class_decl(
   cx: &mut AstPrinter,
@@ -16,7 +24,7 @@ pub fn print_class_decl(
   let mut extends_parts = Vec::new();
 
   parts_group.push(" ".into());
-  parts_group.push(Doc::new_text(class_decl.ident.to_string()));
+  parts_group.push(Doc::new_text(class_decl.ident.sym.to_string()));
 
   if let Some(super_class) = &class_decl.class.super_class {
     todo!()
@@ -81,29 +89,123 @@ pub fn print_class_member(
 ) -> anyhow::Result<Doc> {
   match class_member {
     ClassMember::Constructor(_) => todo!(),
-    ClassMember::Method(class_method) => {
-      let mut parts = Vec::new();
-      if class_method.is_static {
-        parts.push("static ".into());
-      }
-
-      let key_doc = match &class_method.key {
-        PropName::Ident(ident) => Doc::new_text(ident.to_string()),
-        PropName::Str(_) => todo!(),
-        PropName::Num(_) => todo!(),
-        PropName::Computed(_) => todo!(),
-        PropName::BigInt(_) => todo!(),
-      };
-      parts.push(print_function(cx, &class_method.function, Some(key_doc))?);
-
-      Ok(Doc::new_concat(parts))
-    }
+    ClassMember::Method(class_method) => print_class_method(cx, class_method),
     ClassMember::PrivateMethod(_) => todo!(),
-    ClassMember::ClassProp(_) => todo!(),
+    ClassMember::ClassProp(class_prop) => print_class_prop(cx, class_prop),
     ClassMember::PrivateProp(_) => todo!(),
     ClassMember::TsIndexSignature(_) => todo!(),
-    ClassMember::Empty(_) => todo!(),
+    ClassMember::Empty(_) => Ok(Doc::none()),
     ClassMember::StaticBlock(_) => todo!(),
-    ClassMember::AutoAccessor(_) => todo!(),
+    ClassMember::AutoAccessor(acc) => todo!(),
   }
+}
+
+pub fn print_class_method(
+  cx: &mut AstPrinter,
+  class_method: &ClassMethod,
+) -> RDoc {
+  let mut parts = Vec::new();
+  if class_method.is_static {
+    parts.push("static ".into());
+  }
+
+  match class_method.kind {
+    MethodKind::Method => {
+      if class_method.function.is_async {
+        parts.push("async ".into());
+      }
+    }
+    MethodKind::Getter => {
+      parts.push("get ".into());
+    }
+    MethodKind::Setter => {
+      parts.push("set ".into());
+    }
+  }
+
+  if class_method.function.is_generator {
+    parts.push("*".into());
+  }
+
+  parts.push(print_prop_name(cx, &class_method.key)?);
+
+  if class_method.is_optional {
+    parts.push("?".into());
+  }
+
+  parts.push(print_method_body(cx, &class_method.function)?);
+
+  Ok(Doc::new_concat(parts))
+}
+
+pub fn print_class_prop(cx: &mut AstPrinter, class_prop: &ClassProp) -> RDoc {
+  let mut parts = Vec::new();
+  let semi = Doc::from(if cx.semi { ";" } else { "" });
+
+  if class_prop.is_static {
+    parts.push("static ".into());
+  }
+
+  if class_prop.is_override {
+    parts.push("override ".into());
+  }
+  if class_prop.readonly {
+    parts.push("readonly ".into());
+  }
+
+  parts.push(print_prop_name(cx, &class_prop.key)?);
+  if class_prop.is_optional {
+    parts.push("?".into());
+  }
+
+  let left_doc = Doc::new_concat(parts);
+
+  if let Some(value) = class_prop.value.as_ref() {
+    let doc = print_assignment(
+      cx,
+      left_doc,
+      super::assign::AssignmentLeft::PropName(&class_prop.key),
+      " =".into(),
+      &value,
+    )?;
+    Ok(Doc::new_concat(vec![doc, semi]))
+  } else {
+    Ok(Doc::new_concat(vec![left_doc, semi]))
+  }
+}
+
+fn print_prop_name(cx: &mut AstPrinter, prop_name: &PropName) -> RDoc {
+  // TODO: See printPropertyKey() for special cases
+  let doc = match prop_name {
+    PropName::Ident(ident) => cx.print_ident(ident)?,
+    PropName::Str(str) => cx.print_str(str),
+    PropName::Num(number) => cx.print_number(number),
+    PropName::Computed(computed_prop_name) => Doc::new_concat(vec![
+      "[".into(),
+      cx.print_expr(computed_prop_name.expr.as_ref())?,
+      "]".into(),
+    ]),
+    PropName::BigInt(big_int) => cx.print_big_int(big_int),
+  };
+  Ok(doc)
+}
+
+fn print_method_body(cx: &mut AstPrinter, function: &Function) -> RDoc {
+  let params_doc = print_params(cx, &function.params)?;
+
+  let _should_break_params = false;
+  let _should_group_params = false;
+
+  let mut parts = Vec::new();
+
+  parts.push(Doc::group(params_doc));
+
+  if let Some(body) = &function.body {
+    parts.push(" ".into());
+    parts.push(cx.print_block_stmt(body, false)?);
+  } else if cx.semi {
+    parts.push(";".into());
+  }
+
+  Ok(Doc::new_concat(parts))
 }

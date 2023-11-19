@@ -1,5 +1,5 @@
 use swc_ecma_ast::{
-  BlockStmtOrExpr, Callee, Expr, Lit, ObjectPatProp, Pat, PatOrExpr,
+  BlockStmtOrExpr, Callee, Expr, Lit, ObjectPatProp, Pat, PatOrExpr, PropName,
   PropOrSpread,
 };
 use swc_ecma_visit::AstParentKind;
@@ -17,6 +17,7 @@ pub enum AssignmentLeft<'a> {
   Pat(&'a Pat),
   PatOrExpr(&'a PatOrExpr),
   PropOrSpread(&'a PropOrSpread),
+  PropName(&'a PropName),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -256,6 +257,7 @@ fn is_complex_destructuring(left: AssignmentLeft) -> bool {
       },
     },
     AssignmentLeft::PropOrSpread(_) => todo!(),
+    AssignmentLeft::PropName(_) => return false,
   };
 
   object_pat.props.len() > 2

@@ -4,12 +4,13 @@ use swc_common::{
   comments::SingleThreadedComments, BytePos, SourceFile, Spanned,
 };
 use swc_ecma_ast::{
-  ArrayLit, AssignExpr, BlockStmt, CallExpr, CatchClause, Decl, Expr,
-  ExprOrSpread, ExprStmt, ForHead, ForOfStmt, ForStmt, IfStmt, Lit, MemberExpr,
-  MemberProp, Module, ModuleItem, NewExpr, ObjectLit, ObjectPat, ObjectPatProp,
-  OptCall, OptChainBase, Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread,
-  SeqExpr, Stmt, TaggedTpl, Tpl, TryStmt, UnaryExpr, UpdateExpr, VarDecl,
-  VarDeclKind, VarDeclOrExpr, VarDeclarator, YieldExpr,
+  ArrayLit, AssignExpr, BigInt, BlockStmt, CallExpr, CatchClause, Decl, Expr,
+  ExprOrSpread, ExprStmt, ForHead, ForOfStmt, ForStmt, Ident, IfStmt, Lit,
+  MemberExpr, MemberProp, Module, ModuleItem, NewExpr, Number, ObjectLit,
+  ObjectPat, ObjectPatProp, OptCall, OptChainBase, Pat, PatOrExpr, Program,
+  Prop, PropName, PropOrSpread, SeqExpr, Stmt, Str, TaggedTpl, Tpl, TryStmt,
+  UnaryExpr, UpdateExpr, VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
+  YieldExpr,
 };
 use swc_ecma_visit::{
   fields::{
@@ -21,7 +22,7 @@ use swc_ecma_visit::{
 
 use crate::{
   ast_path::{fake_path, sub_box, var, ARef, Path},
-  doc::{Doc, GroupId},
+  doc::{Doc, GroupId, RDoc},
   doc_printer::{print_doc, string_width, DocWriter},
   print_js::{
     assign::{print_assignment, AssignmentLeft},
@@ -1355,17 +1356,11 @@ impl AstPrinter {
 
   fn print_lit(&mut self, lit: &Lit) -> anyhow::Result<Doc> {
     let doc = match lit {
-      Lit::Str(str) => Doc::new_text(format!("\"{}\"", str.value)),
+      Lit::Str(str) => self.print_str(str),
       Lit::Bool(bool) => Doc::new_text(format!("{:?}", bool)),
       Lit::Null(_) => Doc::new_text(format!("null")),
-      Lit::Num(num) => {
-        let raw = num.raw.as_ref().unwrap();
-        Doc::new_text(format!("{}", raw))
-      }
-      Lit::BigInt(big_int) => Doc::new_text(big_int.raw.as_ref().map_or_else(
-        || String::new(),
-        |raw| raw.to_ascii_lowercase().to_string(),
-      )),
+      Lit::Num(num) => self.print_number(num),
+      Lit::BigInt(big_int) => self.print_big_int(big_int),
       Lit::Regex(regex) => {
         Doc::new_text(format!("/{}/{}", regex.exp, regex.flags))
       }
@@ -1373,6 +1368,26 @@ impl AstPrinter {
     };
 
     Ok(doc)
+  }
+
+  pub fn print_ident(&mut self, ident: &Ident) -> RDoc {
+    Ok(Doc::from(ident.sym.as_str()))
+  }
+
+  pub fn print_str(&mut self, str: &Str) -> Doc {
+    Doc::new_text(format!("\"{}\"", str.value))
+  }
+
+  pub fn print_number(&mut self, number: &Number) -> Doc {
+    let raw = number.raw.as_ref().unwrap();
+    Doc::new_text(format!("{}", raw))
+  }
+
+  pub fn print_big_int(&mut self, big_int: &BigInt) -> Doc {
+    Doc::new_text(big_int.raw.as_ref().map_or_else(
+      || String::new(),
+      |raw| raw.to_ascii_lowercase().to_string(),
+    ))
   }
 
   fn print_tpl(&mut self, tpl: &Tpl) -> anyhow::Result<Doc> {

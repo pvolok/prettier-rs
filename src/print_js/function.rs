@@ -339,7 +339,8 @@ fn should_add_parens_if_not_break(body: &BlockStmtOrExpr) -> bool {
     && !starts_with_no_lookahead_token(expr, |expr| expr.is_object())
 }
 
-pub fn print_function(
+
+fn print_function(
   cx: &mut AstPrinter,
   function: &Function,
   ident: Option<Doc>,
@@ -366,7 +367,7 @@ pub fn print_function(
   Ok(doc)
 }
 
-fn print_params(cx: &mut AstPrinter, params: &[Param]) -> anyhow::Result<Doc> {
+pub fn print_params(cx: &mut AstPrinter, params: &[Param]) -> anyhow::Result<Doc> {
   if params.is_empty() {
     return Ok(Doc::new_concat(vec!["(".into(), ")".into()]));
   }

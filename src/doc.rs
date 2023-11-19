@@ -46,10 +46,20 @@ pub enum DocAlign {
   Root,
 }
 
+pub type RDoc = anyhow::Result<Doc>;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct GroupId(pub usize, pub &'static str);
 
 impl Doc {
+  pub fn none() -> Self {
+    "".into()
+  }
+
+  pub fn group(doc: Doc) -> Doc {
+    Doc::new_group(doc, false, None, None)
+  }
+
   pub fn new_indent(contents: Doc) -> Self {
     Doc::Indent(Rc::new(contents))
   }
