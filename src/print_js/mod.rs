@@ -4,4 +4,5 @@ pub mod class;
 pub mod comments;
 pub mod function;
 pub mod parens;
+pub mod statement;
 pub mod ternary;

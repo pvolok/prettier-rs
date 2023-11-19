@@ -9,13 +9,14 @@ use swc_ecma_ast::{
   ForStmt, Ident, IfStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem,
   NewExpr, Number, ObjectLit, ObjectPat, ObjectPatProp, OptCall, OptChainBase,
   Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread, SeqExpr, Stmt, Str,
-  SuperProp, SuperPropExpr, TaggedTpl, Tpl, TryStmt, UnaryExpr, UpdateExpr,
-  VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator, YieldExpr,
+  SuperProp, SuperPropExpr, SwitchCase, SwitchStmt, TaggedTpl, Tpl, TryStmt,
+  UnaryExpr, UpdateExpr, VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
+  YieldExpr,
 };
 use swc_ecma_visit::{
   fields::{
-    AssignExprField, BlockStmtField, ExprField, ForStmtField,
-    OptChainBaseField, OptChainExprField, SeqExprField,
+    AssignExprField, ExprField, ForStmtField, OptChainBaseField,
+    OptChainExprField, SeqExprField,
   },
   AstParentKind, AstParentNodeRef,
 };
@@ -34,6 +35,7 @@ use crate::{
       print_throw_stmt,
     },
     parens::needs_parens,
+    statement::print_stmt_seq,
     ternary::print_cond,
   },
 };
@@ -153,7 +155,7 @@ impl AstPrinter {
     self.stack.pop();
   }
 
-  fn print_stmt(&mut self, stmt: &Stmt) -> anyhow::Result<Doc> {
+  pub fn print_stmt(&mut self, stmt: &Stmt) -> anyhow::Result<Doc> {
     let semi = if self.semi { ";" } else { "" }.into();
 
     match stmt {
@@ -197,7 +199,7 @@ impl AstPrinter {
         Ok(Doc::new_concat(parts))
       }
       Stmt::If(if_stmt) => self.print_if_stmt(if_stmt),
-      Stmt::Switch(_) => todo!(),
+      Stmt::Switch(switch_stmt) => self.print_switch_stmt(switch_stmt),
       Stmt::Throw(throw_stmt) => print_throw_stmt(self, fake_path(throw_stmt)),
       Stmt::Try(try_stmt) => self.print_try_stmt(try_stmt.as_ref()),
       Stmt::While(_) => todo!(),
@@ -219,21 +221,7 @@ impl AstPrinter {
 
     parts.push("{".into());
 
-    let mut body_parts = Vec::new();
-    for (i, stmt) in block_stmt.stmts.iter().enumerate() {
-      self.push(AstParentKind::BlockStmt(BlockStmtField::Stmts(i)));
-      let is_last = i == block_stmt.stmts.len() - 1;
-
-      body_parts.push(self.print_stmt(stmt)?);
-      if !is_last {
-        body_parts.push(Doc::hardline());
-        if self.is_next_line_empty(block_stmt.stmts.iter(), i) {
-          body_parts.push(Doc::hardline());
-        }
-      }
-
-      self.pop();
-    }
+    let mut body_parts = print_stmt_seq(self, &block_stmt.stmts)?;
     if !body_parts.is_empty() {
       parts.push(Doc::new_indent(Doc::new_concat(
         [Doc::hardline()].into_iter().chain(body_parts).collect(),
@@ -298,6 +286,88 @@ impl AstPrinter {
         None,
         None,
       ));
+    }
+
+    Ok(Doc::new_concat(parts))
+  }
+
+  fn print_switch_stmt(
+    &mut self,
+    switch_stmt: &SwitchStmt,
+  ) -> anyhow::Result<Doc> {
+    let mut parts = vec![
+      Doc::group(Doc::new_concat(vec![
+        "switch (".into(),
+        Doc::new_indent(Doc::new_concat(vec![
+          Doc::softline(),
+          self.print_expr(switch_stmt.discriminant.as_ref())?,
+        ])),
+        Doc::softline(),
+        ")".into(),
+      ])),
+      " {".into(),
+    ];
+
+    if !switch_stmt.cases.is_empty() {
+      let mut cases_parts = Vec::new();
+      for (i, switch_case) in switch_stmt.cases.iter().enumerate() {
+        let is_last = i == switch_stmt.cases.len() - 1;
+        let mut case_parts = vec![self.print_switch_case(switch_case)?];
+        if !is_last {
+          case_parts.push(Doc::hardline());
+          if self.is_next_line_empty(switch_stmt.cases.iter(), i) {
+            case_parts.push(Doc::hardline());
+          }
+        }
+        cases_parts.push(Doc::new_concat(case_parts));
+      }
+
+      let doc = Doc::new_indent(Doc::new_concat(vec![
+        Doc::hardline(),
+        Doc::new_concat(cases_parts),
+      ]));
+      parts.push(doc);
+    }
+
+    parts.push(Doc::hardline());
+    parts.push("}".into());
+
+    Ok(Doc::new_concat(parts))
+  }
+
+  fn print_switch_case(
+    &mut self,
+    switch_case: &SwitchCase,
+  ) -> anyhow::Result<Doc> {
+    let mut parts = Vec::new();
+
+    if let Some(test) = &switch_case.test {
+      parts.push("case ".into());
+      parts.push(self.print_expr(&test)?);
+      parts.push(":".into());
+    } else {
+      parts.push("default:".into());
+    }
+
+    if !switch_case.cons.is_empty() {
+      // TODO: handle empty statements
+      let cons = print_stmt_seq(self, &switch_case.cons)?;
+
+      if switch_case.cons.len() == 1
+        && switch_case
+          .cons
+          .first()
+          .map(|stmt| stmt.is_block())
+          .unwrap_or(false)
+      {
+        parts.push(" ".into());
+        parts.extend_from_slice(&cons);
+      } else {
+        parts.push(Doc::new_indent(Doc::new_concat(vec![
+          Doc::hardline(),
+          Doc::new_concat(cons),
+        ])));
+      }
     }
 
     Ok(Doc::new_concat(parts))
