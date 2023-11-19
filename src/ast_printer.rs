@@ -4,13 +4,13 @@ use swc_common::{
   comments::SingleThreadedComments, BytePos, SourceFile, Spanned,
 };
 use swc_ecma_ast::{
-  ArrayLit, AssignExpr, BigInt, BlockStmt, CallExpr, CatchClause, Decl, Expr,
-  ExprOrSpread, ExprStmt, ForHead, ForOfStmt, ForStmt, Ident, IfStmt, Lit,
-  MemberExpr, MemberProp, Module, ModuleItem, NewExpr, Number, ObjectLit,
-  ObjectPat, ObjectPatProp, OptCall, OptChainBase, Pat, PatOrExpr, Program,
-  Prop, PropName, PropOrSpread, SeqExpr, Stmt, Str, TaggedTpl, Tpl, TryStmt,
-  UnaryExpr, UpdateExpr, VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
-  YieldExpr,
+  ArrayLit, AssignExpr, BigInt, BlockStmt, CallExpr, CatchClause,
+  ComputedPropName, Decl, Expr, ExprOrSpread, ExprStmt, ForHead, ForOfStmt,
+  ForStmt, Ident, IfStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem,
+  NewExpr, Number, ObjectLit, ObjectPat, ObjectPatProp, OptCall, OptChainBase,
+  Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread, SeqExpr, Stmt, Str,
+  SuperProp, SuperPropExpr, TaggedTpl, Tpl, TryStmt, UnaryExpr, UpdateExpr,
+  VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator, YieldExpr,
 };
 use swc_ecma_visit::{
   fields::{
@@ -692,7 +692,9 @@ impl AstPrinter {
       Expr::Member(member_expr) => {
         self.print_member_expr(fake_path(member_expr), false)?
       }
-      Expr::SuperProp(super_props_expr) => todo!(),
+      Expr::SuperProp(super_prop_expr) => {
+        self.print_super_prop_expr(fake_path(super_prop_expr), false)?
+      }
       Expr::Cond(cond_expr) => {
         print_cond(self, var!(expr, Expr, cond_expr, Cond))?
       }
@@ -1170,29 +1172,57 @@ impl AstPrinter {
       }
       MemberProp::PrivateName(_) => todo!(),
       MemberProp::Computed(prop) => {
-        let op = if optional { "?." } else { "" };
-        let prop_doc = self.print_expr(&prop.expr)?;
-        match prop.expr.as_ref() {
-          Expr::Lit(Lit::Num(_)) => {
-            Doc::new_concat(vec![op.into(), "[".into(), prop_doc, "]".into()])
-          }
-          _ => Doc::new_group(
-            Doc::new_concat(vec![
-              op.into(),
-              "[".into(),
-              Doc::new_indent(Doc::new_concat(vec![Doc::softline(), prop_doc])),
-              Doc::softline(),
-              "]".into(),
-            ]),
-            false,
-            None,
-            None,
-          ),
-        }
+        self.print_computed_prop_name(prop, optional)?
       }
     };
 
     Ok(Doc::new_concat(vec![obj, lookup]))
+  }
+
+  fn print_super_prop_expr(
+    &mut self,
+    super_prop_expr: Path<SuperPropExpr>,
+    optional: bool,
+  ) -> anyhow::Result<Doc> {
+    let lookup = match &super_prop_expr.node.prop {
+      SuperProp::Ident(ident) => {
+        let op = if optional { "?." } else { "." };
+        Doc::new_concat(vec![op.into(), ident.sym.as_str().into()])
+      }
+      SuperProp::Computed(prop) => {
+        self.print_computed_prop_name(prop, optional)?
+      }
+    };
+
+    Ok(Doc::new_concat(vec!["super".into(), lookup]))
+  }
+
+  fn print_computed_prop_name(
+    &mut self,
+    computed_prop_name: &ComputedPropName,
+    optional: bool,
+  ) -> RDoc {
+    let op = if optional { "?." } else { "" };
+    let doc = self.print_expr(&computed_prop_name.expr)?;
+
+    let doc = match computed_prop_name.expr.as_ref() {
+      Expr::Lit(Lit::Num(_)) => {
+        Doc::new_concat(vec![op.into(), "[".into(), doc, "]".into()])
+      }
+      _ => Doc::new_group(
+        Doc::new_concat(vec![
+          op.into(),
+          "[".into(),
+          Doc::new_indent(Doc::new_concat(vec![Doc::softline(), doc])),
+          Doc::softline(),
+          "]".into(),
+        ]),
+        false,
+        None,
+        None,
+      ),
+    };
+    Ok(doc)
   }
 
   fn print_call_expr(&mut self, call_expr: &CallExpr) -> anyhow::Result<Doc> {

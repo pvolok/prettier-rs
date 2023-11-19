@@ -1,8 +1,6 @@
-use std::rc::Rc;
-
 use swc_ecma_ast::{
-  Class, ClassDecl, ClassMember, ClassMethod, ClassProp, Function, MethodKind,
-  PropName,
+  Class, ClassDecl, ClassMember, ClassMethod, ClassProp, Expr, Function,
+  MethodKind, PrivateMethod, PropName,
 };
 
 use crate::{
@@ -27,7 +25,17 @@ pub fn print_class_decl(
   parts_group.push(Doc::new_text(class_decl.ident.sym.to_string()));
 
   if let Some(super_class) = &class_decl.class.super_class {
-    todo!()
+    // TODO: See printSuperClass()
+    let super_class_doc =
+      Doc::new_concat(vec!["extends ".into(), cx.print_expr(&super_class)?]);
+
+    if group_mode {
+      extends_parts.push(Doc::line());
+      extends_parts.push(Doc::group(super_class_doc));
+    } else {
+      extends_parts.push(" ".into());
+      extends_parts.push(super_class_doc);
+    }
   }
 
   if group_mode {
@@ -90,7 +98,9 @@ pub fn print_class_member(
   match class_member {
     ClassMember::Constructor(_) => todo!(),
     ClassMember::Method(class_method) => print_class_method(cx, class_method),
-    ClassMember::PrivateMethod(_) => todo!(),
+    ClassMember::PrivateMethod(private_method) => {
+      print_private_method(cx, private_method)
+    }
     ClassMember::ClassProp(class_prop) => print_class_prop(cx, class_prop),
     ClassMember::PrivateProp(_) => todo!(),
     ClassMember::TsIndexSignature(_) => todo!(),
@@ -100,10 +110,7 @@ pub fn print_class_member(
   }
 }
 
-pub fn print_class_method(
-  cx: &mut AstPrinter,
-  class_method: &ClassMethod,
-) -> RDoc {
+fn print_class_method(cx: &mut AstPrinter, class_method: &ClassMethod) -> RDoc {
   let mut parts = Vec::new();
   if class_method.is_static {
     parts.push("static ".into());
@@ -134,6 +141,45 @@ pub fn print_class_method(
   }
 
   parts.push(print_method_body(cx, &class_method.function)?);
+
+  Ok(Doc::new_concat(parts))
+}
+
+fn print_private_method(
+  cx: &mut AstPrinter,
+  private_method: &PrivateMethod,
+) -> RDoc {
+  let mut parts = Vec::new();
+  if private_method.is_static {
+    parts.push("static ".into());
+  }
+
+  match private_method.kind {
+    MethodKind::Method => {
+      if private_method.function.is_async {
+        parts.push("async ".into());
+      }
+    }
+    MethodKind::Getter => {
+      parts.push("get ".into());
+    }
+    MethodKind::Setter => {
+      parts.push("set ".into());
+    }
+  }
+
+  if private_method.function.is_generator {
+    parts.push("*".into());
+  }
+
+  parts.push("#".into());
+  parts.push(cx.print_ident(&private_method.key.id)?);
+
+  if private_method.is_optional {
+    parts.push("?".into());
+  }
+
+  parts.push(print_method_body(cx, &private_method.function)?);
 
   Ok(Doc::new_concat(parts))
 }
@@ -208,4 +254,15 @@ fn print_method_body(cx: &mut AstPrinter, function: &Function) -> RDoc {
   }
 
   Ok(Doc::new_concat(parts))
+}
+
+fn print_heritage_clauses(cx: &mut AstPrinter, super_class: &Expr) -> RDoc {
+  Ok(Doc::new_concat(vec![
+    Doc::line(),
+    "extends".into(),
+    Doc::group(Doc::new_indent(Doc::new_concat(vec![
+      Doc::line(),
+      cx.print_expr(super_class)?,
+    ]))),
+  ]))
 }
