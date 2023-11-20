@@ -67,7 +67,11 @@ impl Indent {
         IndentPart::Indent => {
           width += 2;
         }
-        _ => todo!(),
+        IndentPart::Align(doc_align) => match doc_align {
+          DocAlign::Num(num) => width += (*num).try_into().unwrap_or(0),
+          DocAlign::Str(str) => width += str.chars().count() as i32,
+          DocAlign::Root => width = 0,
+        },
       }
       ind = parent;
     }

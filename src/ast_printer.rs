@@ -5,13 +5,13 @@ use swc_common::{
 };
 use swc_ecma_ast::{
   ArrayLit, AssignExpr, AwaitExpr, BigInt, BlockStmt, CallExpr, CatchClause,
-  ComputedPropName, Decl, Expr, ExprOrSpread, ExprStmt, ForHead, ForOfStmt,
-  ForStmt, Ident, IfStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem,
-  NewExpr, Number, ObjectLit, ObjectPat, ObjectPatProp, OptCall, OptChainBase,
-  Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread, SeqExpr, Stmt, Str,
-  SuperProp, SuperPropExpr, SwitchCase, SwitchStmt, TaggedTpl, Tpl, TryStmt,
-  UnaryExpr, UpdateExpr, VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
-  YieldExpr,
+  ComputedPropName, Decl, DoWhileStmt, Expr, ExprOrSpread, ExprStmt, ForHead,
+  ForInStmt, ForOfStmt, ForStmt, Ident, IfStmt, Lit, MemberExpr, MemberProp,
+  Module, ModuleItem, NewExpr, Number, ObjectLit, ObjectPat, ObjectPatProp,
+  OptCall, OptChainBase, Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread,
+  SeqExpr, Stmt, Str, SuperProp, SuperPropExpr, SwitchCase, SwitchStmt,
+  TaggedTpl, Tpl, TryStmt, UnaryExpr, UpdateExpr, VarDecl, VarDeclKind,
+  VarDeclOrExpr, VarDeclarator, WhileStmt, YieldExpr,
 };
 use swc_ecma_visit::{
   fields::{
@@ -179,7 +179,18 @@ impl AstPrinter {
       Stmt::Return(return_stmt) => {
         print_return_stmt(self, fake_path(return_stmt))
       }
-      Stmt::Labeled(_) => todo!(),
+      Stmt::Labeled(labeled_stmt) => {
+        let parts = if labeled_stmt.body.is_empty() {
+          vec![self.print_ident(&labeled_stmt.label)?, ":;".into()]
+        } else {
+          vec![
+            self.print_ident(&labeled_stmt.label)?,
+            ": ".into(),
+            self.print_stmt(&labeled_stmt.body)?,
+          ]
+        };
+        Ok(Doc::new_concat(parts))
+      }
       Stmt::Break(break_stmt) => {
         let mut parts = vec!["break".into()];
         if let Some(label) = &break_stmt.label {
@@ -202,10 +213,10 @@ impl AstPrinter {
       Stmt::Switch(switch_stmt) => self.print_switch_stmt(switch_stmt),
       Stmt::Throw(throw_stmt) => print_throw_stmt(self, fake_path(throw_stmt)),
       Stmt::Try(try_stmt) => self.print_try_stmt(try_stmt.as_ref()),
-      Stmt::While(_) => todo!(),
-      Stmt::DoWhile(_) => todo!(),
+      Stmt::While(while_stmt) => self.print_while_stmt(while_stmt),
+      Stmt::DoWhile(do_while_stmt) => self.print_do_while_stmt(do_while_stmt),
       Stmt::For(for_stmt) => self.print_for_stmt(for_stmt),
-      Stmt::ForIn(_) => todo!(),
+      Stmt::ForIn(for_in_stmt) => self.print_for_in_stmt(for_in_stmt),
       Stmt::ForOf(for_of_stmt) => self.print_for_of_stmt(for_of_stmt),
       Stmt::Decl(decl) => self.print_decl(decl),
       Stmt::Expr(expr_stmt) => self.print_expr_stmt(expr_stmt),
@@ -416,6 +427,55 @@ impl AstPrinter {
     ]))
   }
 
+  fn print_while_stmt(
+    &mut self,
+    while_stmt: &WhileStmt,
+  ) -> anyhow::Result<Doc> {
+    let body_doc = self.print_stmt(&while_stmt.body)?;
+    Ok(Doc::new_concat(vec![
+      "while (".into(),
+      Doc::group(Doc::new_concat(vec![
+        Doc::new_indent(Doc::new_concat(vec![
+          Doc::softline(),
+          self.print_expr(&while_stmt.test)?,
+        ])),
+        Doc::softline(),
+      ])),
+      ")".into(),
+      self.adjust_clause(while_stmt.body.as_ref(), body_doc, false),
+    ]))
+  }
+
+  fn print_do_while_stmt(
+    &mut self,
+    do_while_stmt: &DoWhileStmt,
+  ) -> anyhow::Result<Doc> {
+    let body_doc = self.print_stmt(&do_while_stmt.body)?;
+    let clause = self.adjust_clause(&do_while_stmt.body, body_doc, false);
+    let do_body = Doc::group(Doc::new_concat(vec!["do".into(), clause]));
+    let mut parts = vec![do_body];
+
+    if do_while_stmt.body.is_block() {
+      parts.push(" ".into());
+    } else {
+      parts.push(Doc::hardline());
+    }
+    parts.push("while (".into());
+    parts.push(Doc::group(Doc::new_concat(vec![
+      Doc::new_indent(Doc::new_concat(vec![
+        Doc::softline(),
+        self.print_expr(&do_while_stmt.test)?,
+      ])),
+      Doc::softline(),
+    ])));
+    parts.push(")".into());
+    if self.semi {
+      parts.push(";".into());
+    }
+
+    return Ok(Doc::new_concat(parts));
+  }
+
   fn print_for_stmt(&mut self, for_stmt: &ForStmt) -> anyhow::Result<Doc> {
     self.push(AstParentKind::ForStmt(ForStmtField::Body));
     let body_doc = match for_stmt.body.as_ref() {
@@ -501,6 +561,28 @@ impl AstPrinter {
       None,
     );
     Ok(doc)
+  }
+
+  fn print_for_in_stmt(
+    &mut self,
+    for_in_stmt: &ForInStmt,
+  ) -> anyhow::Result<Doc> {
+    let head_doc = match &for_in_stmt.left {
+      ForHead::VarDecl(var_decl) => self.print_var_decl(var_decl, true)?,
+      ForHead::UsingDecl(_) => todo!(),
+      ForHead::Pat(pat) => self.print_pat(pat)?,
+    };
+    let body_doc = self.print_stmt(&for_in_stmt.body)?;
+    let parts = vec![
+      "for (".into(),
+      head_doc,
+      " in ".into(),
+      self.print_expr(for_in_stmt.right.as_ref())?,
+      ")".into(),
+      self.adjust_clause(&for_in_stmt.body, body_doc, false),
+    ];
+
+    Ok(Doc::new_concat(parts))
   }
 
   fn print_for_of_stmt(
@@ -704,15 +786,15 @@ impl AstPrinter {
 
   pub fn print_pat(&mut self, pat: &Pat) -> anyhow::Result<Doc> {
     let doc = match pat {
-      Pat::Ident(ident) => {
-        let mut parts = Vec::new();
-        parts.push(ident.id.sym.as_str().into());
-        Doc::new_concat(parts)
-      }
+      Pat::Ident(ident) => self.print_ident(ident)?,
       Pat::Array(_) => todo!(),
       Pat::Rest(_) => todo!(),
       Pat::Object(object_pat) => self.print_object_pat(object_pat)?,
-      Pat::Assign(_) => todo!(),
+      Pat::Assign(assign_pat) => Doc::new_concat(vec![
+        self.print_pat(&assign_pat.left)?,
+        " = ".into(),
+        self.print_expr(&assign_pat.right)?,
+      ]),
       Pat::Invalid(_) => todo!(),
       Pat::Expr(expr) => self.print_expr(&expr)?,
     };
