@@ -190,7 +190,7 @@ fn print_private_method(
   }
 
   parts.push("#".into());
-  parts.push(cx.print_ident(&private_method.key.id)?);
+  parts.push(cx.print_ident(&private_method.key.id));
 
   if private_method.is_optional {
     parts.push("?".into());
@@ -240,7 +240,7 @@ pub fn print_class_prop(cx: &mut AstPrinter, class_prop: &ClassProp) -> RDoc {
 fn print_prop_name(cx: &mut AstPrinter, prop_name: &PropName) -> RDoc {
   // TODO: See printPropertyKey() for special cases
   let doc = match prop_name {
-    PropName::Ident(ident) => cx.print_ident(ident)?,
+    PropName::Ident(ident) => cx.print_ident(ident),
     PropName::Str(str) => cx.print_str(str),
     PropName::Num(number) => cx.print_number(number),
     PropName::Computed(computed_prop_name) => Doc::new_concat(vec![

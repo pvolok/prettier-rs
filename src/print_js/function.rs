@@ -23,7 +23,7 @@ pub fn print_fn_decl(
   cx: &mut AstPrinter,
   fn_decl: &FnDecl,
 ) -> anyhow::Result<Doc> {
-  let name_doc = Doc::new_text(fn_decl.ident.to_string());
+  let name_doc = cx.print_ident(&fn_decl.ident);
   print_function(cx, &fn_decl.function, Some(name_doc))
 }
 
@@ -31,10 +31,7 @@ pub fn print_fn_expr(
   cx: &mut AstPrinter,
   fn_expr: &FnExpr,
 ) -> anyhow::Result<Doc> {
-  let name_doc = fn_expr
-    .ident
-    .as_ref()
-    .map(|ident| Doc::new_text(ident.to_string()));
+  let name_doc = fn_expr.ident.as_ref().map(|ident| cx.print_ident(ident));
   print_function(cx, &fn_expr.function, name_doc)
 }
 
@@ -339,7 +336,6 @@ fn should_add_parens_if_not_break(body: &BlockStmtOrExpr) -> bool {
     && !starts_with_no_lookahead_token(expr, |expr| expr.is_object())
 }
 
-
 fn print_function(
   cx: &mut AstPrinter,
   function: &Function,
@@ -367,7 +363,10 @@ fn print_function(
   Ok(doc)
 }
 
-pub fn print_params(cx: &mut AstPrinter, params: &[Param]) -> anyhow::Result<Doc> {
+pub fn print_params(
+  cx: &mut AstPrinter,
+  params: &[Param],
+) -> anyhow::Result<Doc> {
   if params.is_empty() {
     return Ok(Doc::new_concat(vec!["(".into(), ")".into()]));
   }

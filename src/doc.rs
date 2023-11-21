@@ -168,6 +168,17 @@ impl Doc {
     ])
   }
 
+  pub fn literalline() -> Self {
+    Doc::new_concat(vec![
+      Doc::Line {
+        hard: true,
+        soft: false,
+        literal: true,
+      },
+      Doc::BreakParent,
+    ])
+  }
+
   pub fn softline() -> Self {
     Doc::Line {
       hard: false,
@@ -193,7 +204,7 @@ impl Doc {
   }
 
   pub fn join(sep: &Doc, items: Vec<Doc>) -> Vec<Doc> {
-    let mut ret = Vec::with_capacity(items.len() * 2 - 1);
+    let mut ret = Vec::with_capacity((items.len() * 2).saturating_sub(1));
     for (i, item) in items.into_iter().enumerate() {
       if i > 0 {
         ret.push(sep.clone());

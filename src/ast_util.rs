@@ -1,7 +1,5 @@
-use swc_ecma_ast::{
-  Callee, Expr, Lit, Module, OptChainBase, PatOrExpr, Stmt, UnaryOp,
-};
-use swc_ecma_visit::{Fold, FoldWith};
+use swc_ecma_ast::{Callee, Expr, Lit, OptChainBase, PatOrExpr, UnaryOp};
+use swc_ecma_visit::FoldWith;
 
 use crate::ast_printer::AstPrinter;
 
@@ -126,7 +124,7 @@ pub fn skip_parens(expr: &Expr) -> &Expr {
   }
 }
 
-struct AstCleaner;
+pub struct AstCleaner;
 
 impl swc_ecma_visit::Fold for AstCleaner {
   fn fold_expr(&mut self, n: Expr) -> Expr {
@@ -139,4 +137,54 @@ impl swc_ecma_visit::Fold for AstCleaner {
 
 pub fn clean_ast<N: FoldWith<AstCleaner>>(node: N) -> N {
   node.fold_with(&mut AstCleaner)
+}
+
+pub enum Quote {
+  Single,
+  Double,
+}
+
+impl Quote {
+  pub fn char(&self) -> char {
+    match self {
+      Quote::Single => '\'',
+      Quote::Double => '"',
+    }
+  }
+
+  pub fn str(&self) -> &str {
+    match self {
+      Quote::Single => "'",
+      Quote::Double => "\"",
+    }
+  }
+}
+
+pub fn get_preferred_quote(raw: &str, prefer_single_quote: bool) -> Quote {
+  let preferred = if prefer_single_quote {
+    Quote::Single
+  } else {
+    Quote::Double
+  };
+  let alternate = if !prefer_single_quote {
+    Quote::Single
+  } else {
+    Quote::Double
+  };
+
+  let mut preferred_quote_count = 0;
+  let mut alternate_quote_count = 0;
+  for c in raw.chars() {
+    if c == preferred.char() {
+      preferred_quote_count += 1;
+    } else if c == alternate.char() {
+      alternate_quote_count += 1;
+    }
+  }
+
+  if preferred_quote_count > alternate_quote_count {
+    alternate
+  } else {
+    preferred
+  }
 }

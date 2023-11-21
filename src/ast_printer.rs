@@ -34,6 +34,8 @@ use crate::{
       print_arrow_expr, print_fn_decl, print_fn_expr, print_return_stmt,
       print_throw_stmt,
     },
+    jsx::print_jsx_element,
+    module::print_module_decl,
     parens::needs_parens,
     statement::print_stmt_seq,
     ternary::print_cond,
@@ -50,6 +52,11 @@ pub struct AstPrinter {
   pub tab_width: i32,
   pub print_width: i32,
   pub semi: bool,
+  pub bracket_spacing: bool,
+  pub bracket_same_line: bool,
+  pub jsx_single_quote: bool,
+  pub jsx_bracket_spacing: bool,
+  pub single_attribute_per_line: bool,
 }
 
 impl AstPrinter {
@@ -67,6 +74,11 @@ impl AstPrinter {
       tab_width: 2,
       print_width: 80,
       semi: true,
+      bracket_spacing: true,
+      bracket_same_line: false,
+      jsx_single_quote: false,
+      jsx_bracket_spacing: false,
+      single_attribute_per_line: false,
     }
   }
 }
@@ -142,7 +154,9 @@ impl AstPrinter {
     module_item: Path<'_, ModuleItem>,
   ) -> anyhow::Result<Doc> {
     match module_item.node {
-      ModuleItem::ModuleDecl(_) => todo!(),
+      ModuleItem::ModuleDecl(module_decl) => {
+        print_module_decl(self, module_decl)
+      }
       ModuleItem::Stmt(stmt) => self.print_stmt(stmt),
     }
   }
@@ -181,10 +195,10 @@ impl AstPrinter {
       }
       Stmt::Labeled(labeled_stmt) => {
         let parts = if labeled_stmt.body.is_empty() {
-          vec![self.print_ident(&labeled_stmt.label)?, ":;".into()]
+          vec![self.print_ident(&labeled_stmt.label), ":;".into()]
         } else {
           vec![
-            self.print_ident(&labeled_stmt.label)?,
+            self.print_ident(&labeled_stmt.label),
             ": ".into(),
             self.print_stmt(&labeled_stmt.body)?,
           ]
@@ -232,7 +246,7 @@ impl AstPrinter {
 
     parts.push("{".into());
 
-    let mut body_parts = print_stmt_seq(self, &block_stmt.stmts)?;
+    let body_parts = print_stmt_seq(self, &block_stmt.stmts)?;
     if !body_parts.is_empty() {
       parts.push(Doc::new_indent(Doc::new_concat(
         [Doc::hardline()].into_iter().chain(body_parts).collect(),
@@ -626,7 +640,7 @@ impl AstPrinter {
     Ok(doc)
   }
 
-  fn print_decl(&mut self, decl: &Decl) -> anyhow::Result<Doc> {
+  pub fn print_decl(&mut self, decl: &Decl) -> anyhow::Result<Doc> {
     match decl {
       Decl::Class(class_decl) => print_class_decl(self, class_decl),
       Decl::Fn(fn_decl) => print_fn_decl(self, fn_decl),
@@ -786,7 +800,7 @@ impl AstPrinter {
 
   pub fn print_pat(&mut self, pat: &Pat) -> anyhow::Result<Doc> {
     let doc = match pat {
-      Pat::Ident(ident) => self.print_ident(ident)?,
+      Pat::Ident(ident) => self.print_ident(ident),
       Pat::Array(_) => todo!(),
       Pat::Rest(_) => todo!(),
       Pat::Object(object_pat) => self.print_object_pat(object_pat)?,
@@ -870,14 +884,14 @@ impl AstPrinter {
       Expr::JSXMember(_) => todo!(),
       Expr::JSXNamespacedName(_) => todo!(),
       Expr::JSXEmpty(_) => todo!(),
-      Expr::JSXElement(_) => todo!(),
+      Expr::JSXElement(jsx_element) => print_jsx_element(self, jsx_element)?,
       Expr::JSXFragment(_) => todo!(),
-      Expr::TsTypeAssertion(_) => todo!(),
-      Expr::TsConstAssertion(_) => todo!(),
-      Expr::TsNonNull(_) => todo!(),
-      Expr::TsAs(_) => todo!(),
-      Expr::TsInstantiation(_) => todo!(),
-      Expr::TsSatisfies(_) => todo!(),
+      Expr::TsTypeAssertion(_) => todo!("ts"),
+      Expr::TsConstAssertion(_) => todo!("ts"),
+      Expr::TsNonNull(_) => todo!("ts"),
+      Expr::TsAs(_) => todo!("ts"),
+      Expr::TsInstantiation(_) => todo!("ts"),
+      Expr::TsSatisfies(_) => todo!("ts"),
       Expr::PrivateName(_) => todo!(),
       Expr::OptChain(opt_chain_expr) => {
         let opt_chain_expr = fake_path(opt_chain_expr);
@@ -1536,7 +1550,7 @@ impl AstPrinter {
     Ok(doc)
   }
 
-  fn print_lit(&mut self, lit: &Lit) -> anyhow::Result<Doc> {
+  pub fn print_lit(&mut self, lit: &Lit) -> anyhow::Result<Doc> {
     let doc = match lit {
       Lit::Str(str) => self.print_str(str),
       Lit::Bool(bool) => Doc::new_text(format!("{:?}", bool)),
@@ -1552,8 +1566,8 @@ impl AstPrinter {
     Ok(doc)
   }
 
-  pub fn print_ident(&mut self, ident: &Ident) -> RDoc {
-    Ok(Doc::from(ident.sym.as_str()))
+  pub fn print_ident(&mut self, ident: &Ident) -> Doc {
+    Doc::from(ident.sym.as_str())
   }
 
   pub fn print_str(&mut self, str: &Str) -> Doc {

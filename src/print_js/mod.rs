@@ -3,6 +3,8 @@ pub mod bin_expr;
 pub mod class;
 pub mod comments;
 pub mod function;
+pub mod jsx;
+pub mod module;
 pub mod parens;
 pub mod statement;
 pub mod ternary;
