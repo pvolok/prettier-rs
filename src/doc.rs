@@ -1,4 +1,8 @@
-use std::{borrow::Cow, rc::Rc};
+use std::{
+  cell::Cell,
+  fmt::{write, Write},
+  rc::Rc,
+};
 
 #[derive(Debug, Clone)]
 pub enum Doc {
@@ -6,7 +10,7 @@ pub enum Doc {
   Group {
     id: Option<GroupId>, // Placeholder for actual type of ID
     contents: Rc<Doc>,
-    break_: bool,
+    break_: Cell<bool>,
     expanded_states: Option<Vec<Doc>>,
   },
   Fill {
@@ -60,6 +64,10 @@ impl Doc {
     Doc::new_group(doc, false, None, None)
   }
 
+  pub fn conditional_group(states: Vec<Doc>) -> Doc {
+    Doc::new_group(states.first().unwrap().clone(), false, Some(states), None)
+  }
+
   pub fn new_indent(contents: Doc) -> Self {
     Doc::Indent(Rc::new(contents))
   }
@@ -76,7 +84,7 @@ impl Doc {
   ) -> Self {
     Doc::Group {
       contents: Rc::new(contents),
-      break_,
+      break_: break_.into(),
       expanded_states,
       id,
     }
@@ -238,6 +246,134 @@ impl Doc {
       Doc::Text(_) => false,
       Doc::Array(items) => items.iter().any(|item| item.can_break()),
     }
+  }
+
+  pub fn will_break(&self) -> bool {
+    match self {
+      Doc::Align(doc, _) => doc.will_break(),
+      Doc::Group {
+        contents, break_, ..
+      } => break_.get() || contents.will_break(),
+      Doc::Fill { items, offset } => {
+        items.iter().skip(*offset).any(|item| item.will_break())
+      }
+      Doc::IfBreak {
+        break_doc,
+        flat_doc,
+        ..
+      } => break_doc.will_break() || flat_doc.will_break(),
+      Doc::Indent(doc) => doc.will_break(),
+      Doc::IndentIfBreak { contents, .. } => contents.will_break(),
+      Doc::LineSuffix(_) => todo!(),
+      Doc::LineSuffixBoundary => todo!(),
+      Doc::BreakParent => true,
+      Doc::Trim => false,
+      Doc::Line { hard, .. } => true,
+      Doc::Cursor => false,
+      Doc::Label(_, doc) => doc.will_break(),
+      Doc::Text(_) => false,
+      Doc::Array(items) => items.iter().any(|item| item.will_break()),
+    }
+  }
+
+  pub fn debug(&self) -> String {
+    let mut buf = String::new();
+
+    fn rec(buf: &mut String, ind: usize, doc: &Doc) {
+      match doc {
+        Doc::Align(doc, align) => {
+          write!(buf, "align {:?}", align).unwrap();
+          write!(buf, "\n{}", "  ".repeat(ind + 1)).unwrap();
+          rec(buf, ind + 1, doc);
+        }
+        Doc::Group {
+          id,
+          contents,
+          break_,
+          expanded_states,
+        } => {
+          write!(buf, "group break:{:?}, id:{:?}", break_.get(), id).unwrap();
+          write!(buf, "\n{}content:", "  ".repeat(ind + 1)).unwrap();
+          write!(buf, "\n{}", "  ".repeat(ind + 2)).unwrap();
+          rec(buf, ind + 2, &contents);
+
+          write!(buf, "\n{}expanded_states:", "  ".repeat(ind + 1)).unwrap();
+          if let Some(expanded_states) = expanded_states {
+            for item in expanded_states {
+              write!(buf, "\n{}- ", "  ".repeat(ind + 1)).unwrap();
+              rec(buf, ind + 2, item);
+            }
+          }
+        }
+        Doc::Fill { items, offset } => {
+          write!(buf, "fill").unwrap();
+          for item in items.as_ref() {
+            write!(buf, "\n{}- ", "  ".repeat(ind)).unwrap();
+            rec(buf, ind + 1, item);
+          }
+        }
+        Doc::IfBreak {
+          break_doc,
+          flat_doc,
+          group_id,
+        } => {
+          write!(buf, "if-break id:{:?}", group_id).unwrap();
+          write!(buf, "\n{}break:", "  ".repeat(ind + 1)).unwrap();
+          write!(buf, "\n{}", "  ".repeat(ind + 2)).unwrap();
+          rec(buf, ind + 2, &break_doc);
+          write!(buf, "\n{}flat:", "  ".repeat(ind + 1)).unwrap();
+          write!(buf, "\n{}", "  ".repeat(ind + 2)).unwrap();
+          rec(buf, ind + 2, &flat_doc);
+        }
+        Doc::Indent(doc) => {
+          write!(buf, "indent").unwrap();
+          write!(buf, "\n{}", "  ".repeat(ind + 1)).unwrap();
+          rec(buf, ind + 1, &doc);
+        }
+        Doc::IndentIfBreak {
+          contents,
+          group_id,
+          negate,
+        } => {
+          write!(buf, "indent-if-break id:{:?}, neg:{}", group_id, negate)
+            .unwrap();
+          write!(buf, "\n{}", "  ".repeat(ind + 1)).unwrap();
+          rec(buf, ind + 1, &contents);
+        }
+        Doc::LineSuffix(_) => todo!(),
+        Doc::LineSuffixBoundary => {
+          write!(buf, "line-suffix-boundary").unwrap();
+        }
+        Doc::BreakParent => {
+          write!(buf, "break-parent").unwrap();
+        }
+        Doc::Trim => {
+          write!(buf, "trim").unwrap();
+        }
+        Doc::Line {
+          hard,
+          soft,
+          literal,
+        } => {
+          write!(buf, "line hard:{} soft:{} lit:{}", hard, soft, literal)
+            .unwrap();
+        }
+        Doc::Cursor => todo!(),
+        Doc::Label(_, _) => todo!(),
+        Doc::Text(str) => {
+          write!(buf, "\"{}\"", str).unwrap();
+        }
+        Doc::Array(items) => {
+          write!(buf, "array:").unwrap();
+          for item in items.as_ref() {
+            write!(buf, "\n{}- ", "  ".repeat(ind)).unwrap();
+            rec(buf, ind + 1, item);
+          }
+        }
+      }
+    }
+    rec(&mut buf, 0, self);
+    buf
   }
 }
 

@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
 use swc_common::{
-  comments::SingleThreadedComments, BytePos, SourceFile, Spanned,
+  comments::SingleThreadedComments, BytePos, SourceFile, SourceMap, Spanned,
 };
 use swc_ecma_ast::{
-  ArrayLit, AssignExpr, AwaitExpr, BigInt, BlockStmt, CallExpr, CatchClause,
+  AssignExpr, AwaitExpr, BigInt, BlockStmt, CallExpr, CatchClause,
   ComputedPropName, Decl, DoWhileStmt, Expr, ExprOrSpread, ExprStmt, ForHead,
   ForInStmt, ForOfStmt, ForStmt, Ident, IfStmt, Lit, MemberExpr, MemberProp,
   Module, ModuleItem, NewExpr, Number, ObjectLit, ObjectPat, ObjectPatProp,
@@ -26,8 +26,10 @@ use crate::{
   doc::{Doc, GroupId, RDoc},
   doc_printer::{print_doc, string_width, DocWriter},
   print_js::{
+    array::print_array_lit,
     assign::{print_assignment, AssignmentLeft},
     bin_expr::print_bin_expr,
+    call::{print_call_expr, print_new_expr, print_opt_call},
     class::{print_class_decl, print_class_expr},
     comments::print_dangling_comments,
     function::{
@@ -43,7 +45,8 @@ use crate::{
 };
 
 pub struct AstPrinter {
-  src_file: Rc<SourceFile>,
+  pub cm: Rc<SourceMap>,
+  pub src_file: Rc<SourceFile>,
   comments: SingleThreadedComments,
   last_group_id: usize,
 
@@ -61,10 +64,12 @@ pub struct AstPrinter {
 
 impl AstPrinter {
   pub fn new(
+    cm: Rc<SourceMap>,
     src_file: Rc<SourceFile>,
     comments: SingleThreadedComments,
   ) -> Self {
     Self {
+      cm,
       src_file,
       comments,
       last_group_id: 0,
@@ -113,7 +118,11 @@ impl AstPrinter {
     self.have_line_between_spans(cur.span_hi(), next.span_lo())
   }
 
-  fn have_line_between_spans(&self, cur_hi: BytePos, next_lo: BytePos) -> bool {
+  pub fn have_line_between_spans(
+    &self,
+    cur_hi: BytePos,
+    next_lo: BytePos,
+  ) -> bool {
     self.src_file.lookup_line(cur_hi).unwrap_or(0) + 1
       < self.src_file.lookup_line(next_lo).unwrap_or(0)
   }
@@ -143,6 +152,8 @@ impl AstPrinter {
         }
       }
     }
+
+    contents.push(Doc::hardline());
 
     let doc = Doc::new_concat(contents);
 
@@ -846,7 +857,7 @@ impl AstPrinter {
   pub fn print_expr_path(&mut self, expr: Path<Expr>) -> anyhow::Result<Doc> {
     let doc = match expr.node {
       Expr::This(_this_expr) => "this".into(),
-      Expr::Array(array_lit) => self.print_array_lit(array_lit)?,
+      Expr::Array(array_lit) => print_array_lit(self, array_lit)?,
       Expr::Object(object_lit) => self.print_object_lit(object_lit)?,
       Expr::Fn(fn_expr) => print_fn_expr(self, fn_expr)?,
       Expr::Unary(unary_expr) => self.print_unary_expr(unary_expr)?,
@@ -864,8 +875,8 @@ impl AstPrinter {
       Expr::Cond(cond_expr) => {
         print_cond(self, var!(expr, Expr, cond_expr, Cond))?
       }
-      Expr::Call(call_expr) => self.print_call_expr(call_expr)?,
-      Expr::New(new_expr) => self.print_new_expr(new_expr)?,
+      Expr::Call(call_expr) => print_call_expr(self, call_expr)?,
+      Expr::New(new_expr) => print_new_expr(self, new_expr)?,
       Expr::Seq(seq_expr) => self.print_seq_expr(&fake_path(seq_expr))?,
       Expr::Ident(ident) => Doc::new_text(ident.sym.to_string()),
       Expr::Lit(lit) => self.print_lit(lit)?,
@@ -874,7 +885,7 @@ impl AstPrinter {
       Expr::Arrow(arrow_expr) => print_arrow_expr(
         self,
         expr.sub(|p| (ARef::Expr(p, ExprField::Arrow), arrow_expr)),
-        None,
+        &Default::default(),
       )?,
       Expr::Class(class_expr) => print_class_expr(self, class_expr)?,
       Expr::Yield(yield_expr) => self.print_yield_expr(yield_expr)?,
@@ -911,7 +922,7 @@ impl AstPrinter {
             });
             self.print_member_expr(member_expr, opt_chain_expr.node.optional)?
           }
-          OptChainBase::Call(opt_call) => self.print_opt_call(opt_call)?,
+          OptChainBase::Call(opt_call) => print_opt_call(self, opt_call)?,
         }
       }
       Expr::Invalid(_) => todo!(),
@@ -926,128 +937,6 @@ impl AstPrinter {
     parts.push(doc);
     if needs_parens {
       parts.push(")".into());
-    }
-
-    Ok(Doc::new_concat(parts))
-  }
-
-  fn print_array_lit(&mut self, array_lit: &ArrayLit) -> anyhow::Result<Doc> {
-    let mut parts = Vec::new();
-
-    let open_bracket = "[";
-    let close_bracket = "]";
-
-    if array_lit.elems.is_empty() {
-      parts.push(open_bracket.into());
-      parts.push(close_bracket.into());
-    } else {
-      // We can unwrap because array is not empty.
-      let last_elem = array_lit.elems.last().unwrap();
-      let can_have_trailing_comma =
-        last_elem.as_ref().map_or(true, |el| el.spread.is_none());
-
-      // JavaScript allows you to have empty elements in an array which
-      // changes its length based on the number of commas. The algorithm
-      // is that if the last argument is null, we need to force insert
-      // a comma to ensure JavaScript recognizes it.
-      //   [,].length === 1
-      //   [1,].length === 1
-      //   [1,,].length === 2
-      let needs_forced_trailing_comma = last_elem.is_none();
-
-      let group_id = self.group_id("array");
-
-      // TODO
-      let should_break = false;
-
-      let should_use_concise_formatting = array_lit.elems.iter().all(|el| {
-        el.as_ref().map_or(false, |el| {
-          matches!(el.expr.as_ref(), Expr::Lit(Lit::Num(_)))
-        })
-      });
-
-      let trailing_comma = if !can_have_trailing_comma {
-        "".into()
-      } else if needs_forced_trailing_comma {
-        ",".into()
-      } else if should_use_concise_formatting {
-        Doc::new_if_break(",".into(), "".into(), Some(group_id))
-      } else {
-        Doc::new_if_break(",".into(), "".into(), None)
-      };
-
-      let elems_doc = if should_use_concise_formatting {
-        let mut elems_parts = Vec::new();
-        for (i, elem) in array_lit.elems.iter().enumerate() {
-          let is_last = i == array_lit.elems.len() - 1;
-
-          let elem_doc = if let Some(elem) = elem {
-            self.print_expr(&elem.expr)?
-          } else {
-            Doc::from("")
-          };
-          let comma = if is_last {
-            trailing_comma.clone()
-          } else {
-            ",".into()
-          };
-          elems_parts.push(Doc::new_concat(vec![elem_doc, comma]));
-
-          if !is_last {
-            if self.is_next_line_empty(array_lit.elems.iter(), i) {
-              elems_parts
-                .push(Doc::new_concat(vec![Doc::hardline(), Doc::hardline()]));
-            } else {
-              elems_parts.push(Doc::line());
-            }
-          }
-        }
-
-        Doc::new_fill(elems_parts)
-      } else {
-        let mut elems_parts = Vec::new();
-        for (i, elem) in array_lit.elems.iter().enumerate() {
-          let is_last = i == array_lit.elems.len() - 1;
-
-          let mut elem_parts = Vec::new();
-          if let Some(elem) = elem {
-            if elem.spread.is_some() {
-              elem_parts.push("...".into());
-            }
-            elem_parts.push(self.print_expr(&elem.expr)?);
-          }
-          elems_parts.push(Doc::new_group(
-            Doc::new_concat(elem_parts),
-            false,
-            None,
-            None,
-          ));
-
-          if !is_last {
-            elems_parts.push(",".into());
-            elems_parts.push(Doc::line());
-            if self.is_next_line_empty(array_lit.elems.iter(), i) {
-              elems_parts.push(Doc::softline());
-            }
-          }
-        }
-
-        elems_parts.push(trailing_comma);
-
-        Doc::new_concat(elems_parts)
-      };
-
-      parts.push(Doc::new_group(
-        Doc::new_concat(vec![
-          open_bracket.into(),
-          Doc::new_indent(Doc::new_concat(vec![Doc::softline(), elems_doc])),
-          Doc::softline(),
-          close_bracket.into(),
-        ]),
-        should_break,
-        None,
-        Some(group_id),
-      ))
     }
 
     Ok(Doc::new_concat(parts))
@@ -1388,120 +1277,6 @@ impl AstPrinter {
         None,
       ),
     };
-    Ok(doc)
-  }
-
-  fn print_call_expr(&mut self, call_expr: &CallExpr) -> anyhow::Result<Doc> {
-    let callee_doc = match &call_expr.callee {
-      swc_ecma_ast::Callee::Super(_) => "super".into(),
-      swc_ecma_ast::Callee::Import(_) => "import".into(),
-      swc_ecma_ast::Callee::Expr(expr) => self.print_expr(expr)?,
-    };
-
-    let args = self.print_call_expr_args(&call_expr.args)?;
-
-    let doc = Doc::new_concat(vec![callee_doc, args]);
-
-    Ok(doc)
-  }
-
-  fn print_opt_call(&mut self, opt_call: &OptCall) -> anyhow::Result<Doc> {
-    let callee_doc = self.print_expr(&opt_call.callee)?;
-
-    let args = self.print_call_expr_args(&opt_call.args)?;
-
-    let doc = Doc::new_concat(vec![callee_doc, "?.".into(), args]);
-
-    Ok(doc)
-  }
-
-  fn print_call_expr_args(
-    &mut self,
-    args: &[ExprOrSpread],
-  ) -> anyhow::Result<Doc> {
-    let mut any_arg_empty_line = false;
-    let args_len = args.len();
-
-    let all_args_broken_out = |args: Vec<Doc>| -> Doc {
-      Doc::new_group(
-        Doc::new_concat(vec![
-          "(".into(),
-          Doc::new_indent(Doc::new_concat(
-            [Doc::line()].into_iter().chain(args).collect(),
-          )),
-          ",".into(),
-          Doc::line(),
-          ")".into(),
-        ]),
-        true,
-        None,
-        None,
-      )
-    };
-
-    let args = args
-      .iter()
-      .enumerate()
-      .map(|(i, expr_or_spread)| {
-        let is_last = i == args_len - 1;
-        let expr_doc = self.print_expr(&expr_or_spread.expr)?;
-        let doc = if expr_or_spread.spread.is_some() {
-          Doc::new_concat(vec![Doc::new_text("...".to_string()), expr_doc])
-        } else {
-          expr_doc
-        };
-        let doc = if !is_last {
-          let mut parts = vec![doc, ",".into()];
-
-          if self.is_next_line_empty(args.iter(), i) {
-            any_arg_empty_line = true;
-            parts.push(Doc::hardline());
-            parts.push(Doc::hardline());
-          } else {
-            parts.push(Doc::line());
-          }
-          Doc::new_concat(parts)
-        } else {
-          doc
-        };
-        Ok(doc)
-      })
-      .collect::<anyhow::Result<Vec<Doc>>>()?;
-
-    if any_arg_empty_line {
-      return Ok(all_args_broken_out(args));
-    }
-
-    let doc = Doc::new_group(
-      Doc::new_concat(vec![
-        "(".into(),
-        Doc::new_indent(Doc::new_concat(
-          [Doc::softline()].into_iter().chain(args).collect(),
-        )),
-        Doc::new_if_break(",".into(), "".into(), None),
-        Doc::softline(),
-        ")".into(),
-      ])
-      .into(),
-      false,
-      None,
-      None,
-    );
-
-    Ok(doc)
-  }
-
-  fn print_new_expr(&mut self, new_expr: &NewExpr) -> anyhow::Result<Doc> {
-    let callee_doc = self.print_expr(&new_expr.callee)?;
-
-    let args = if let Some(args) = &new_expr.args {
-      self.print_call_expr_args(args)?
-    } else {
-      self.print_call_expr_args(&[])?
-    };
-
-    let doc = Doc::new_concat(vec!["new ".into(), callee_doc, args]);
-
     Ok(doc)
   }
 

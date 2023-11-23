@@ -35,10 +35,17 @@ pub fn print_fn_expr(
   print_function(cx, &fn_expr.function, name_doc)
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ArrowArgs {
+  pub assignment_layout: Option<AssignmentLayout>,
+  pub expand_first_arg: bool,
+  pub expand_last_arg: bool,
+}
+
 pub fn print_arrow_expr(
   cx: &mut AstPrinter,
   arrow_expr: Path<ArrowExpr>,
-  assignment_layout: Option<AssignmentLayout>,
+  args: &ArrowArgs,
 ) -> anyhow::Result<Doc> {
   let should_print_as_chain = arrow_expr
     .node
@@ -124,18 +131,14 @@ pub fn print_arrow_expr(
   };
   let chain_group_id = cx.group_id("arrow-chain");
 
-  let sigs_doc = print_arrow_sigs(
-    cx,
-    vars.sig_docs,
-    vars.should_break_chain,
-    assignment_layout,
-  )?;
+  let sigs_doc =
+    print_arrow_sigs(cx, vars.sig_docs, vars.should_break_chain, args)?;
 
   let mut should_break_sigs = false;
   let mut should_indent_sigs = false;
-  if should_print_as_chain && (is_callee || assignment_layout.is_some()) {
+  if should_print_as_chain && (is_callee || args.assignment_layout.is_some()) {
     should_indent_sigs = true;
-    should_break_sigs = assignment_layout
+    should_break_sigs = args.assignment_layout
       == Some(AssignmentLayout::ChainTailArrowChain)
       || (is_callee && !vars.should_put_body_on_same_line);
   }
@@ -171,13 +174,13 @@ fn print_arrow_sigs(
   cx: &mut AstPrinter,
   sig_docs: Vec<Doc>,
   should_break: bool,
-  assignment_layout: Option<AssignmentLayout>,
+  args: &ArrowArgs,
 ) -> anyhow::Result<Doc> {
   if sig_docs.len() == 1 {
     return Ok(sig_docs.get(0).unwrap().clone());
   }
 
-  if assignment_layout.is_some() {
+  if args.assignment_layout.is_some() {
     let doc = Doc::new_group(
       Doc::new_concat(
         sig_docs

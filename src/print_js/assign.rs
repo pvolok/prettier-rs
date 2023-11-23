@@ -11,7 +11,10 @@ use crate::{
   doc::Doc,
 };
 
-use super::{bin_expr::should_inline_bin_expr, function::print_arrow_expr};
+use super::{
+  bin_expr::should_inline_bin_expr,
+  function::{print_arrow_expr, ArrowArgs},
+};
 
 pub enum AssignmentLeft<'a> {
   Pat(&'a Pat),
@@ -45,9 +48,14 @@ pub fn print_assignment(
   //   Doc::new_concat(vec![op_doc, format!("<{:?}>", layout).as_str().into()]);
 
   let right_doc = match skip_parens(right) {
-    Expr::Arrow(arrow_expr) => {
-      print_arrow_expr(cx, fake_path(arrow_expr), Some(layout))?
-    }
+    Expr::Arrow(arrow_expr) => print_arrow_expr(
+      cx,
+      fake_path(arrow_expr),
+      &ArrowArgs {
+        assignment_layout: Some(layout),
+        ..Default::default()
+      },
+    )?,
     _ => cx.print_expr(right)?,
   };
 

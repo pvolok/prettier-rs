@@ -1,5 +1,7 @@
+pub mod array;
 pub mod assign;
 pub mod bin_expr;
+pub mod call;
 pub mod class;
 pub mod comments;
 pub mod function;

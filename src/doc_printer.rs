@@ -132,6 +132,8 @@ pub fn print_doc(
 
   let mut should_remeasure = false;
 
+  propagate_breaks(doc);
+
   while let Some(Command { ind, mode, doc }) = cmds.pop() {
     match doc {
       Doc::Align(doc, align) => {
@@ -147,11 +149,16 @@ pub fn print_doc(
         break_,
         expanded_states,
       } => {
+        let break_ = break_.get();
         match mode {
           BreakMode::Flat if !should_remeasure => {
             cmds.push(Command {
               ind: ind.clone(),
-              mode,
+              mode: if break_ {
+                BreakMode::Break
+              } else {
+                BreakMode::Flat
+              },
               doc: contents.as_ref().clone(),
             });
           }
@@ -163,6 +170,7 @@ pub fn print_doc(
               mode: BreakMode::Flat,
               doc: contents.as_ref().clone(),
             };
+            let rem = width - pos;
             if !break_
               && fits(
                 &next,
@@ -175,10 +183,58 @@ pub fn print_doc(
             {
               cmds.push(next);
             } else {
-              cmds.push(Command {
-                mode: BreakMode::Break,
-                ..next
-              });
+              // Expanded states are a rare case where a document
+              // can manually provide multiple representations of
+              // itself. It provides an array of documents
+              // going from the least expanded (most flattened)
+              // representation first to the most expanded. If a
+              // group has these, we need to manually go through
+              // these states and find the first one that fits.
+              // eslint-disable-next-line no-lonely-if
+              if let Some(expanded_states) = expanded_states {
+                let most_expanded = expanded_states.last().unwrap();
+
+                if break_ {
+                  cmds.push(Command {
+                    ind: ind.clone(),
+                    mode: BreakMode::Break,
+                    doc: most_expanded.clone(),
+                  });
+                } else {
+                  for i in 1..expanded_states.len() + 1 {
+                    if let Some(state) = expanded_states.get(i) {
+                      let cmd = Command {
+                        ind: ind.clone(),
+                        mode: BreakMode::Flat,
+                        doc: state.clone(),
+                      };
+                      if fits(
+                        &cmd,
+                        &cmds,
+                        rem,
+                        !line_suffix.is_empty(),
+                        &mut group_mode_map,
+                        false,
+                      ) {
+                        cmds.push(cmd);
+                        break;
+                      }
+                    } else {
+                      cmds.push(Command {
+                        ind: ind.clone(),
+                        mode: BreakMode::Break,
+                        doc: most_expanded.clone(),
+                      });
+                      break;
+                    }
+                  }
+                }
+              } else {
+                cmds.push(Command {
+                  mode: BreakMode::Break,
+                  ..next
+                });
+              }
             }
           }
         };
@@ -475,17 +531,18 @@ fn fits(
         break_,
         expanded_states,
       } => {
-        if must_be_flat && break_ {
+        if must_be_flat && break_.get() {
           return false;
         }
-        let group_mode = if break_ { BreakMode::Break } else { mode };
-        // TODO: handle expanded_states
-        // let contents =
-        //    && groupMode === MODE_BREAK
-        //     ? doc.expandedStates.at(-1)
-        //     : doc.contents;
-        // cmds.push({ mode: groupMode, doc: contents });
-        cmds.push((group_mode, contents.as_ref().clone()));
+        let group_mode = if break_.get() { BreakMode::Break } else { mode };
+        // The most expanded state takes up the least space on the current line.
+        let contents = match expanded_states {
+          Some(expanded_states) if break_.get() => {
+            expanded_states.last().unwrap().clone()
+          }
+          _ => contents.as_ref().clone(),
+        };
+        cmds.push((group_mode, contents));
       }
       Doc::IfBreak {
         break_doc,
@@ -517,7 +574,7 @@ fn fits(
           return false;
         }
       }
-      Doc::BreakParent => todo!(),
+      Doc::BreakParent => (),
       Doc::Trim => todo!(),
       Doc::Line {
         hard,
@@ -566,4 +623,50 @@ pub fn string_width(s: &str) -> i32 {
       1
     })
     .sum()
+}
+
+fn propagate_breaks(doc: &Doc) {
+  fn rec(doc: &Doc) -> bool {
+    match doc {
+      Doc::Align(doc, _) => rec(doc),
+      Doc::Group {
+        id: _,
+        contents,
+        break_,
+        expanded_states,
+      } => {
+        let new_break_ =
+          (rec(contents) && expanded_states.is_none()) || break_.get();
+        break_.set(new_break_);
+        new_break_
+      }
+      Doc::Fill { items, offset } => items
+        .iter()
+        .skip(*offset)
+        .fold(false, |acc, item| rec(item) || acc),
+      Doc::IfBreak {
+        break_doc,
+        flat_doc,
+        ..
+      } => {
+        let br = rec(break_doc);
+        let fl = rec(flat_doc);
+        br || fl
+      }
+      Doc::Indent(doc) => rec(doc),
+      Doc::IndentIfBreak { contents, .. } => rec(contents),
+      Doc::LineSuffix(doc) => rec(doc),
+      Doc::LineSuffixBoundary => false,
+      Doc::BreakParent => true,
+      Doc::Trim => false,
+      Doc::Line { .. } => false,
+      Doc::Cursor => false,
+      Doc::Label(_, doc) => rec(doc),
+      Doc::Text(_) => false,
+      Doc::Array(items) => {
+        items.iter().fold(false, |acc, item| rec(item) || acc)
+      }
+    }
+  }
+  rec(doc);
 }
