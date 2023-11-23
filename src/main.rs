@@ -24,6 +24,7 @@ fn main() {
     jsx: true,
     fn_bind: true,
     decorators: true,
+    export_default_from: true,
     ..Default::default()
   };
 

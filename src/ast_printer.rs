@@ -31,7 +31,7 @@ use crate::{
     bin_expr::print_bin_expr,
     call::{print_call_expr, print_new_expr, print_opt_call},
     class::{print_class_decl, print_class_expr},
-    comments::print_dangling_comments,
+    comments::{print_dangling_comments, print_leading_comments},
     function::{
       print_arrow_expr, print_fn_decl, print_fn_expr, print_return_stmt,
       print_throw_stmt,
@@ -183,7 +183,7 @@ impl AstPrinter {
   pub fn print_stmt(&mut self, stmt: &Stmt) -> anyhow::Result<Doc> {
     let semi = if self.semi { ";" } else { "" }.into();
 
-    match stmt {
+    let doc = match stmt {
       Stmt::Block(block_stmt) => self.print_block_stmt(block_stmt, true),
       Stmt::Empty(_) => Ok("".into()),
       Stmt::Debugger(_) => Ok(Doc::new_concat(vec!["debugger".into(), semi])),
@@ -245,6 +245,20 @@ impl AstPrinter {
       Stmt::ForOf(for_of_stmt) => self.print_for_of_stmt(for_of_stmt),
       Stmt::Decl(decl) => self.print_decl(decl),
       Stmt::Expr(expr_stmt) => self.print_expr_stmt(expr_stmt),
+    }?;
+
+    let leading = self
+      .comments
+      .with_leading(stmt.span_lo(), |cmts| cmts.to_vec());
+    let trailing = self
+      .comments
+      .with_trailing(stmt.span_hi(), |cmts| cmts.to_vec());
+    let leading_doc = print_leading_comments(self, &leading);
+
+    if leading.is_empty() && trailing.is_empty() {
+      Ok(doc)
+    } else {
+      Ok(Doc::new_concat(vec![leading_doc, doc]))
     }
   }
 
