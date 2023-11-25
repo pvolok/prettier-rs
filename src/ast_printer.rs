@@ -921,7 +921,9 @@ impl AstPrinter {
       Expr::Update(unpdate_expr) => {
         self.print_update_expr(var!(expr, Expr, unpdate_expr, Update))?
       }
-      Expr::Bin(bin_expr) => print_bin_expr(self, bin_expr)?,
+      Expr::Bin(bin_expr) => {
+        print_bin_expr(self, var!(expr, Expr, bin_expr, Bin))?
+      }
       Expr::Assign(assign_expr) => self.print_assign_expr(assign_expr)?,
       Expr::Member(member_expr) => {
         self.print_member_expr(fake_path(member_expr), false)?

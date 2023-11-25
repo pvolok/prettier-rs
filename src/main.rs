@@ -3,7 +3,7 @@
 #![feature(iter_intersperse)]
 #![feature(slice_take)]
 
-use std::{collections::BTreeMap, io::Read, path::PathBuf};
+use std::{io::Read, path::PathBuf};
 
 use doc_printer::{print_doc, DocWriter};
 use swc_common::{comments::SingleThreadedComments, sync::Lrc, SourceMap};

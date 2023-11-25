@@ -1,20 +1,26 @@
 use swc_ecma_ast::{BinExpr, BinaryOp, Expr};
 
-use crate::{ast_printer::AstPrinter, doc::Doc};
+use crate::{
+  ast_path::{sub, sub_box, var, Path},
+  ast_printer::AstPrinter,
+  doc::Doc,
+};
 
 pub fn print_bin_expr(
   cx: &mut AstPrinter,
-  bin_expr: &BinExpr,
+  bin_expr: Path<BinExpr>,
 ) -> anyhow::Result<Doc> {
   print_bin_expr_inner(cx, bin_expr, false)
 }
 
 pub fn print_bin_expr_inner(
   cx: &mut AstPrinter,
-  bin_expr: &BinExpr,
+  bin_expr: Path<BinExpr>,
   is_nested: bool,
 ) -> anyhow::Result<Doc> {
   let mut parts = Vec::new();
+
+  let left = sub_box!(bin_expr, BinExpr, left, Left);
 
   // Put all operators with the same precedence level in the same
   // group. The reason we only need to do this with the `left`
@@ -25,26 +31,22 @@ pub fn print_bin_expr_inner(
   // precedence level and should be treated as a separate group, so
   // print them normally. (This doesn't hold for the `**` operator,
   // which is unique in that it is right-associative.)
-  match bin_expr.left.as_ref() {
+  match left.node {
     Expr::Bin(left_bin_expr)
-      if should_flatten(bin_expr.op, left_bin_expr.op) =>
+      if should_flatten(bin_expr.node.op, left_bin_expr.op) =>
     {
+      let left_bin_expr = var!(left, Expr, left_bin_expr, Bin);
       parts.push(print_bin_expr_inner(cx, left_bin_expr, true)?);
     }
     _ => {
-      parts.push(Doc::new_group(
-        cx.print_expr(&bin_expr.left)?,
-        false,
-        None,
-        None,
-      ));
+      parts.push(Doc::new_group(cx.print_expr_path(left)?, false, None, None));
     }
   }
 
-  let should_inline = should_inline_bin_expr(bin_expr);
+  let should_inline = should_inline_bin_expr(bin_expr.node);
   let line_before_operator = false;
 
-  let op_doc = Doc::from(bin_expr.op.as_str());
+  let op_doc = Doc::from(bin_expr.node.op.as_str());
 
   let right = Doc::new_concat(vec![
     op_doc,
@@ -53,7 +55,7 @@ pub fn print_bin_expr_inner(
     } else {
       Doc::line()
     },
-    cx.print_expr(&bin_expr.right)?,
+    cx.print_expr_path(sub_box!(bin_expr, BinExpr, right, Right))?,
   ]);
 
   let should_break = false;
@@ -69,8 +71,32 @@ pub fn print_bin_expr_inner(
   Ok(Doc::new_concat(parts))
 }
 
+fn get_precedence(op: BinaryOp) -> u8 {
+  match op {
+    BinaryOp::NullishCoalescing => 1,
+    BinaryOp::LogicalOr => 2,
+    BinaryOp::LogicalAnd => 3,
+    BinaryOp::BitOr => 4,
+    BinaryOp::BitXor => 5,
+    BinaryOp::BitAnd => 6,
+    BinaryOp::EqEq | BinaryOp::NotEq | BinaryOp::EqEqEq | BinaryOp::NotEqEq => {
+      7
+    }
+    BinaryOp::Lt
+    | BinaryOp::LtEq
+    | BinaryOp::Gt
+    | BinaryOp::GtEq
+    | BinaryOp::In
+    | BinaryOp::InstanceOf => 8,
+    BinaryOp::LShift | BinaryOp::RShift | BinaryOp::ZeroFillRShift => 9,
+    BinaryOp::Add | BinaryOp::Sub => 10,
+    BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => 11,
+    BinaryOp::Exp => 12,
+  }
+}
+
 fn should_flatten(parent_op: BinaryOp, node_op: BinaryOp) -> bool {
-  if node_op.precedence() != parent_op.precedence() {
+  if get_precedence(node_op) != get_precedence(parent_op) {
     return false;
   }
 

@@ -1,5 +1,5 @@
 use swc_common::Spanned;
-use swc_ecma_ast::{BlockStmtOrExpr, Expr};
+use swc_ecma_ast::{BinExpr, BlockStmtOrExpr, Expr};
 
 use crate::{
   ast_path::{ARef, Path},
@@ -29,6 +29,12 @@ pub fn needs_parens(cx: &mut AstPrinter, expr: &Path<Expr>) -> bool {
         _ => (),
       }
     }
+    Expr::Bin(bin_expr) => match expr.parent.node_ref {
+      ARef::BinExpr(BinExpr { op: parent_op, .. }, _) => {
+        return bin_expr.op != *parent_op
+      }
+      _ => (),
+    },
     _ => (),
   }
 

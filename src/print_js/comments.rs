@@ -53,7 +53,7 @@ pub fn print_leading_comments(
 ) -> Doc {
   let mut parts = Vec::new();
 
-  for cmt in cx.cmts.by_lo.range(start..end).map(|(k, v)| v) {
+  for cmt in cx.cmts.by_lo.range(start..end.max(start)).map(|(k, v)| v) {
     parts.push(print_comment(cmt));
 
     match cmt.kind {
