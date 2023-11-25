@@ -1,3 +1,4 @@
+use swc_common::Spanned;
 use swc_ecma_ast::{
   Class, ClassDecl, ClassExpr, ClassMember, ClassMethod, ClassProp, Expr,
   Function, Ident, MethodKind, PrivateMethod, PropName,
@@ -254,7 +255,17 @@ fn print_prop_name(cx: &mut AstPrinter, prop_name: &PropName) -> RDoc {
 }
 
 fn print_method_body(cx: &mut AstPrinter, function: &Function) -> RDoc {
-  let params_doc = print_params(cx, &function.params)?;
+  let params_doc = print_params(
+    cx,
+    (
+      function.span_lo(),
+      function
+        .body
+        .as_ref()
+        .map_or_else(|| function.span_hi(), |b| b.span_lo()),
+    ),
+    &function.params,
+  )?;
 
   let _should_break_params = false;
   let _should_group_params = false;

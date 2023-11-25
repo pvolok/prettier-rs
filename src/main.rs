@@ -1,8 +1,9 @@
+#![feature(btree_cursors)]
 #![feature(concat_idents)]
 #![feature(iter_intersperse)]
 #![feature(slice_take)]
 
-use std::{io::Read, path::PathBuf};
+use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
 use doc_printer::{print_doc, DocWriter};
 use swc_common::{comments::SingleThreadedComments, sync::Lrc, SourceMap};
@@ -10,6 +11,7 @@ use swc_ecma_parser::EsConfig;
 
 use crate::{
   ast_path::fake_path, ast_printer::AstPrinter, ast_util::clean_ast,
+  print_js::comments::Cmts,
 };
 
 mod ast_path;
@@ -57,9 +59,24 @@ fn main() {
 
   let module_path = fake_path(&module_ast);
 
-  // println!("COMMENTS:\n{:#?}\n", comments);
+  let mut cmts = Cmts::new();
+  {
+    let (leading, trailing) = comments.borrow_all();
 
-  let mut printer = AstPrinter::new(cm, src_file.clone(), comments);
+    for (_attach_pos, comments) in leading.iter() {
+      for comment in comments {
+        cmts.add(comment);
+      }
+    }
+    for (_attach_pos, comments) in trailing.iter() {
+      for comment in comments {
+        cmts.add(comment);
+      }
+    }
+    // println!("COMMENTS:\n{:#?}\n", comments);
+  }
+
+  let mut printer = AstPrinter::new(cm, src_file.clone(), comments, cmts);
   let doc = printer.print_module(module_path).unwrap();
 
   if std::env::var("DOC").is_ok() {

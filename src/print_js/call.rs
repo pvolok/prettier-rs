@@ -1,5 +1,5 @@
 use swc_ecma_ast::{
-  BlockStmtOrExpr, CallExpr, Expr, ExprOrSpread, NewExpr, OptCall,
+  BlockStmtOrExpr, CallExpr, Callee, Expr, ExprOrSpread, Lit, NewExpr, OptCall,
 };
 
 use crate::{ast_path::fake_path, ast_printer::AstPrinter, doc::Doc};
@@ -18,6 +18,36 @@ pub fn print_call_expr(
     swc_ecma_ast::Callee::Import(_) => "import".into(),
     swc_ecma_ast::Callee::Expr(expr) => cx.print_expr(expr)?,
   };
+
+  // TODO
+  let is_tpl_lit_single_arg = false;
+
+  fn is_test_call() -> bool {
+    false
+  }
+  if is_tpl_lit_single_arg
+    || call_expr.args.len() > 0
+      && (is_common_js_or_amd_call(call_expr) || is_test_call())
+  {
+    let arg_docs = call_expr
+      .args
+      .iter()
+      .map(|arg| {
+        let expr_doc = cx.print_expr(&arg.expr)?;
+        Ok(if arg.spread.is_some() {
+          Doc::new_concat(vec!["...".into(), expr_doc])
+        } else {
+          expr_doc
+        })
+      })
+      .collect::<anyhow::Result<Vec<Doc>>>()?;
+    return Ok(Doc::new_concat(vec![
+      callee_doc,
+      "(".into(),
+      Doc::new_concat(Doc::join(&", ".into(), arg_docs)),
+      ")".into(),
+    ]));
+  }
 
   let args = print_call_expr_args(cx, &call_expr.args)?;
 
@@ -221,7 +251,7 @@ fn should_expand_last_arg(args: &[ExprOrSpread]) -> bool {
     && last_arg
       .expr
       .as_array()
-      .map(|arr| is_consicely_printed_array(arr))
+      .map(|arr| is_consicely_printed_array(&arr.elems))
       .unwrap_or(false)
   {
     return false;
@@ -259,4 +289,26 @@ fn could_expand_arg(arg: &Expr, arrow_chain_recursion: bool) -> bool {
     },
     _ => false,
   }
+}
+
+fn is_common_js_or_amd_call(call_expr: &CallExpr) -> bool {
+  match &call_expr.callee {
+    Callee::Expr(expr) => match expr.as_ref() {
+      Expr::Ident(ident) => {
+        if ident.sym == "require" {
+          return call_expr.args.len() == 1
+            && call_expr.args.first().map_or(false, |a| {
+              a.expr.as_lit().map_or(false, |l| matches!(l, Lit::Str(_)))
+            })
+            || call_expr.args.len() > 1;
+        } else if ident.sym == "define" {
+          todo!()
+        }
+      }
+      _ => (),
+    },
+    _ => (),
+  }
+
+  false
 }

@@ -1,3 +1,6 @@
+use std::ops::Range;
+
+use swc_common::{BytePos, Span, Spanned};
 use swc_ecma_ast::{
   ArrowExpr, BlockStmtOrExpr, Expr, FnDecl, FnExpr, Function, Ident, Param,
   ReturnStmt, ThrowStmt,
@@ -12,12 +15,13 @@ use swc_ecma_visit::{
 
 use crate::{
   ast_path::{sub_box, var, ARef, Path},
-  ast_printer::AstPrinter,
+  ast_printer::{AstPrinter, Comma, SrcItem},
   ast_util::starts_with_no_lookahead_token,
   doc::Doc,
+  print_js::comments::print_leading_comments,
 };
 
-use super::assign::AssignmentLayout;
+use super::{assign::AssignmentLayout, comments::print_trailing_comments};
 
 pub fn print_fn_decl(
   cx: &mut AstPrinter,
@@ -225,11 +229,13 @@ fn print_arrow_sig(
     .map(|pat| Param::from(pat.clone()))
     .collect::<Vec<_>>();
 
+  let params_range = (arrow_expr.span_lo(), arrow_expr.body.span_lo());
+
   if should_print_arrow_params_without_parens(cx, arrow_expr) {
-    parts.push(print_params(cx, &params)?);
+    parts.push(print_params(cx, params_range, &params)?);
   } else {
     parts.push(Doc::new_group(
-      print_params(cx, &params)?,
+      print_params(cx, params_range, &params)?,
       false,
       None,
       None,
@@ -349,8 +355,42 @@ fn print_function(
     parts.push(ident);
   }
 
+  let open_brace_pos = cx
+    .iter_ascii_chars(function.span_lo())
+    .find_map(|c| match c {
+      SrcItem::Ascii(c, pos) if c == '(' => Some(pos),
+      _ => None,
+    })
+    .ok_or_else(|| anyhow::Error::msg("open_brace_pos"))?;
+  let maybe_newline = cx
+    .iter_ascii_chars(BytePos(open_brace_pos.0 + 1))
+    .skip_while(|item| {
+      matches!(item, SrcItem::Ascii(' ' | '\t', _) | SrcItem::Comment(_))
+    })
+    .next();
+  let params_start = match maybe_newline {
+    Some(SrcItem::Ascii('\n', pos)) => pos,
+    _ => BytePos(open_brace_pos.0 + 1),
+  };
+
+  parts.push(print_trailing_comments(
+    cx,
+    function.span_lo(),
+    params_start,
+  ));
+
   parts.push(Doc::new_group(
-    print_params(cx, &function.params)?,
+    print_params(
+      cx,
+      (
+        params_start,
+        function
+          .body
+          .as_ref()
+          .map_or_else(|| function.span_hi(), |body| body.span_lo()),
+      ),
+      &function.params,
+    )?,
     false,
     None,
     None,
@@ -368,28 +408,43 @@ fn print_function(
 
 pub fn print_params(
   cx: &mut AstPrinter,
+  range: (BytePos, BytePos),
   params: &[Param],
 ) -> anyhow::Result<Doc> {
+  let mut from_pos = range.0;
+
   if params.is_empty() {
     return Ok(Doc::new_concat(vec!["(".into(), ")".into()]));
   }
 
-  let mut printed = Vec::new();
+  let mut parts = Vec::new();
   let params_len = params.len();
   for (i, param) in params.iter().enumerate() {
+    let param_start = param.span_lo();
+    parts.push(print_leading_comments(cx, from_pos, param_start));
+    from_pos = param.span_hi();
+
     let is_last = i == params_len - 1;
-    printed.push(cx.print_pat(&param.pat)?);
+    parts.push(cx.print_pat(&param.pat)?);
     if !is_last {
-      printed.push(",".into());
-      printed.push(Doc::line());
+      parts.push(",".into());
+      parts.push(Doc::line());
     }
   }
+
+  parts.push(print_trailing_comments(cx, from_pos, range.1));
 
   Ok(Doc::new_concat(vec![
     "(".into(),
     Doc::new_indent(Doc::new_concat(
-      [&[Doc::softline()], printed.as_slice()].concat(),
+      [&[Doc::softline()], parts.as_slice()].concat(),
     )),
+    if cx.should_print_comma == Comma::All {
+      ","
+    } else {
+      ""
+    }
+    .into(),
     Doc::softline(),
     ")".into(),
   ]))

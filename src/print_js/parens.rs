@@ -7,7 +7,7 @@ use crate::{
   ast_util::starts_with_no_lookahead_token,
 };
 
-pub fn needs_parens(cx: &mut AstPrinter, expr: Path<Expr>) -> bool {
+pub fn needs_parens(cx: &mut AstPrinter, expr: &Path<Expr>) -> bool {
   match expr.node {
     Expr::Object(object_lit) => {
       let cur_obj_expr_span = expr.span();

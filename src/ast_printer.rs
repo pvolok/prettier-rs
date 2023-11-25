@@ -1,7 +1,8 @@
-use std::rc::Rc;
+use std::{ascii::AsciiExt, ops::Bound, rc::Rc};
 
 use swc_common::{
-  comments::SingleThreadedComments, BytePos, SourceFile, SourceMap, Spanned,
+  comments::SingleThreadedComments, BytePos, SourceFile, SourceMap, Span,
+  Spanned,
 };
 use swc_ecma_ast::{
   AssignExpr, AwaitExpr, BigInt, BlockStmt, CallExpr, CatchClause,
@@ -9,9 +10,9 @@ use swc_ecma_ast::{
   ForInStmt, ForOfStmt, ForStmt, Ident, IfStmt, Lit, MemberExpr, MemberProp,
   Module, ModuleItem, NewExpr, Number, ObjectLit, ObjectPat, ObjectPatProp,
   OptCall, OptChainBase, Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread,
-  SeqExpr, Stmt, Str, SuperProp, SuperPropExpr, SwitchCase, SwitchStmt,
-  TaggedTpl, Tpl, TryStmt, UnaryExpr, UpdateExpr, VarDecl, VarDeclKind,
-  VarDeclOrExpr, VarDeclarator, WhileStmt, YieldExpr,
+  RestPat, SeqExpr, Stmt, Str, SuperProp, SuperPropExpr, SwitchCase,
+  SwitchStmt, TaggedTpl, Tpl, TryStmt, UnaryExpr, UpdateExpr, VarDecl,
+  VarDeclKind, VarDeclOrExpr, VarDeclarator, WhileStmt, YieldExpr,
 };
 use swc_ecma_visit::{
   fields::{
@@ -26,12 +27,12 @@ use crate::{
   doc::{Doc, GroupId, RDoc},
   doc_printer::{print_doc, string_width, DocWriter},
   print_js::{
-    array::print_array_lit,
+    array::{print_array_lit, print_array_pat},
     assign::{print_assignment, AssignmentLeft},
     bin_expr::print_bin_expr,
     call::{print_call_expr, print_new_expr, print_opt_call},
     class::{print_class_decl, print_class_expr},
-    comments::{print_dangling_comments, print_leading_comments},
+    comments::{print_dangling_comments, Cmts},
     function::{
       print_arrow_expr, print_fn_decl, print_fn_expr, print_return_stmt,
       print_throw_stmt,
@@ -47,7 +48,8 @@ use crate::{
 pub struct AstPrinter {
   pub cm: Rc<SourceMap>,
   pub src_file: Rc<SourceFile>,
-  comments: SingleThreadedComments,
+  pub comments: SingleThreadedComments,
+  pub cmts: Cmts,
   last_group_id: usize,
 
   pub stack: Vec<AstParentKind>,
@@ -60,6 +62,12 @@ pub struct AstPrinter {
   pub jsx_single_quote: bool,
   pub jsx_bracket_spacing: bool,
   pub single_attribute_per_line: bool,
+  pub should_print_comma: Comma,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Comma {
+  All,
 }
 
 impl AstPrinter {
@@ -67,11 +75,13 @@ impl AstPrinter {
     cm: Rc<SourceMap>,
     src_file: Rc<SourceFile>,
     comments: SingleThreadedComments,
+    cmts: Cmts,
   ) -> Self {
     Self {
       cm,
       src_file,
       comments,
+      cmts,
       last_group_id: 0,
 
       stack: Vec::new(),
@@ -84,6 +94,7 @@ impl AstPrinter {
       jsx_single_quote: false,
       jsx_bracket_spacing: false,
       single_attribute_per_line: false,
+      should_print_comma: Comma::All,
     }
   }
 }
@@ -247,19 +258,7 @@ impl AstPrinter {
       Stmt::Expr(expr_stmt) => self.print_expr_stmt(expr_stmt),
     }?;
 
-    let leading = self
-      .comments
-      .with_leading(stmt.span_lo(), |cmts| cmts.to_vec());
-    let trailing = self
-      .comments
-      .with_trailing(stmt.span_hi(), |cmts| cmts.to_vec());
-    let leading_doc = print_leading_comments(self, &leading);
-
-    if leading.is_empty() && trailing.is_empty() {
-      Ok(doc)
-    } else {
-      Ok(Doc::new_concat(vec![leading_doc, doc]))
-    }
+    Ok(doc)
   }
 
   pub fn print_block_stmt(
@@ -736,6 +735,18 @@ impl AstPrinter {
   ) -> anyhow::Result<Doc> {
     let left_doc = self.print_pat(&var_declarator.name)?;
 
+    if let Some(init) = var_declarator.init.as_ref() {
+      return print_assignment(
+        self,
+        left_doc,
+        AssignmentLeft::Pat(&var_declarator.name),
+        " =".into(),
+        init,
+      );
+    } else {
+      return Ok(left_doc);
+    }
+
     fn calc_doc_width(doc: &Doc) -> i32 {
       match doc {
         Doc::Align(doc, _) => calc_doc_width(doc),
@@ -826,8 +837,8 @@ impl AstPrinter {
   pub fn print_pat(&mut self, pat: &Pat) -> anyhow::Result<Doc> {
     let doc = match pat {
       Pat::Ident(ident) => self.print_ident(ident),
-      Pat::Array(_) => todo!(),
-      Pat::Rest(_) => todo!(),
+      Pat::Array(array_pat) => print_array_pat(self, array_pat)?,
+      Pat::Rest(rest_pat) => self.print_rest_pat(rest_pat)?,
       Pat::Object(object_pat) => self.print_object_pat(object_pat)?,
       Pat::Assign(assign_pat) => Doc::new_concat(vec![
         self.print_pat(&assign_pat.left)?,
@@ -839,6 +850,13 @@ impl AstPrinter {
     };
 
     Ok(doc)
+  }
+
+  fn print_rest_pat(&mut self, rest_pat: &RestPat) -> RDoc {
+    Ok(Doc::new_concat(vec![
+      "...".into(),
+      self.print_pat(&rest_pat.arg)?,
+    ]))
   }
 
   fn print_expr_stmt(&mut self, expr_stmt: &ExprStmt) -> anyhow::Result<Doc> {
@@ -944,7 +962,7 @@ impl AstPrinter {
 
     let mut parts = Vec::new();
 
-    let needs_parens = needs_parens(self, expr);
+    let needs_parens = needs_parens(self, &expr);
     if needs_parens {
       parts.push("(".into());
     }
@@ -953,7 +971,9 @@ impl AstPrinter {
       parts.push(")".into());
     }
 
-    Ok(Doc::new_concat(parts))
+    let doc = Doc::new_concat(parts);
+
+    Ok(doc)
   }
 
   fn print_object_lit(
@@ -1074,7 +1094,28 @@ impl AstPrinter {
               None,
             )
           }
-          ObjectPatProp::Assign(_) => todo!(),
+          ObjectPatProp::Assign(assign_pat_prop) => {
+            let key = self.print_ident(&assign_pat_prop.key);
+
+            if let Some(value) = assign_pat_prop.value.as_ref() {
+              let value = self.print_expr(&value)?;
+
+              let group_id = self.group_id("assigment");
+              Doc::new_group(
+                Doc::new_concat(vec![
+                  key,
+                  ":".into(),
+                  Doc::new_group(Doc::line(), false, None, Some(group_id)),
+                  Doc::new_indent_if_break(value, Some(group_id), false),
+                ]),
+                false,
+                None,
+                None,
+              )
+            } else {
+              key
+            }
+          }
           ObjectPatProp::Rest(_) => todo!(),
         };
 
@@ -1482,5 +1523,106 @@ impl AstPrinter {
     }
 
     return Doc::new_indent(Doc::new_concat(vec![Doc::line(), clause]));
+  }
+
+  pub fn iter_ascii_chars(&self, byte_pos: BytePos) -> SrcAsciiIter {
+    SrcAsciiIter {
+      cx: self,
+      index: self.pos_to_idx(byte_pos),
+    }
+  }
+
+  pub fn iter_ascii_chars_rev(&self, byte_pos: BytePos) -> SrcAsciiRevIter {
+    SrcAsciiRevIter {
+      cx: self,
+      index: self.pos_to_idx(byte_pos),
+    }
+  }
+
+  pub fn span_snippet(&self, span: Span) -> &str {
+    &self.src_file.src.as_str()
+      [self.pos_to_idx(span.lo)..self.pos_to_idx(span.hi)]
+  }
+
+  pub fn line_no(&self, byte_pos: BytePos) -> usize {
+    self.src_file.lookup_line(byte_pos).unwrap_or(0)
+  }
+
+  pub fn pos_to_idx(&self, pos: BytePos) -> usize {
+    (pos.0 - self.src_file.start_pos.0) as usize
+  }
+
+  pub fn idx_to_pos(&self, index: usize) -> BytePos {
+    BytePos(self.src_file.start_pos.0 + index as u32)
+  }
+}
+
+#[derive(Debug)]
+pub enum SrcItem {
+  Ascii(char, BytePos),
+  NonAscii,
+  Comment(Span),
+}
+
+pub struct SrcAsciiIter<'a> {
+  cx: &'a AstPrinter,
+  index: usize,
+}
+
+impl Iterator for SrcAsciiIter<'_> {
+  type Item = SrcItem;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    let src = self.cx.src_file.src.as_bytes();
+    if self.index >= src.len() {
+      return None;
+    }
+    let index = self.index;
+    self.index += 1;
+
+    let prev_cmt = self.cx.cmts.by_lo.get(&self.cx.idx_to_pos(index));
+    if let Some(cmt) = prev_cmt {
+      self.index = self.cx.pos_to_idx(cmt.span_hi());
+      return Some(SrcItem::Comment(cmt.span()));
+    }
+
+    let next_byte = src[index];
+
+    if next_byte.is_ascii() {
+      Some(SrcItem::Ascii(next_byte as char, self.cx.idx_to_pos(index)))
+    } else {
+      Some(SrcItem::NonAscii)
+    }
+  }
+}
+
+pub struct SrcAsciiRevIter<'a> {
+  cx: &'a AstPrinter,
+  index: usize,
+}
+
+impl Iterator for SrcAsciiRevIter<'_> {
+  type Item = SrcItem;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    if self.index == 0 {
+      return None;
+    }
+    self.index -= 1;
+    let index = self.index;
+
+    let prev_cmt = self.cx.cmts.by_hi.get(&self.cx.idx_to_pos(index));
+    if let Some(cmt) = prev_cmt {
+      self.index = self.cx.pos_to_idx(cmt.span_lo());
+      return Some(SrcItem::Comment(cmt.span()));
+    }
+
+    let next_byte = self.cx.src_file.src.as_bytes()[index];
+
+    if next_byte.is_ascii() {
+      Some(SrcItem::Ascii(next_byte as char, self.cx.idx_to_pos(index)))
+    } else {
+      Some(SrcItem::NonAscii)
+    }
   }
 }
