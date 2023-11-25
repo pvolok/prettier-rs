@@ -14,7 +14,7 @@ use swc_ecma_visit::{
 };
 
 use crate::{
-  ast_path::{sub_box, var, ARef, Path},
+  ast_path::{fake_path, sub, sub_box, var, ARef, Path},
   ast_printer::{AstPrinter, Comma, SrcItem},
   ast_util::starts_with_no_lookahead_token,
   doc::Doc,
@@ -420,12 +420,13 @@ pub fn print_params(
   let mut parts = Vec::new();
   let params_len = params.len();
   for (i, param) in params.iter().enumerate() {
+    let param_path = fake_path(param);
     let param_start = param.span_lo();
     parts.push(print_leading_comments(cx, from_pos, param_start));
     from_pos = param.span_hi();
 
     let is_last = i == params_len - 1;
-    parts.push(cx.print_pat(&param.pat)?);
+    parts.push(cx.print_pat_path(sub!(param_path, Param, pat, Pat))?);
     if !is_last {
       parts.push(",".into());
       parts.push(Doc::line());
@@ -439,12 +440,18 @@ pub fn print_params(
     Doc::new_indent(Doc::new_concat(
       [&[Doc::softline()], parts.as_slice()].concat(),
     )),
-    if cx.should_print_comma == Comma::All {
-      ","
-    } else {
-      ""
-    }
-    .into(),
+    Doc::new_if_break(
+      if params.last().map_or(false, |p| !p.pat.is_rest())
+        && cx.should_print_comma == Comma::All
+      {
+        ","
+      } else {
+        ""
+      }
+      .into(),
+      Doc::none(),
+      None,
+    ),
     Doc::softline(),
     ")".into(),
   ]))

@@ -341,7 +341,7 @@ impl Doc {
           rec(buf, ind + 1, &contents);
         }
         Doc::LineSuffix(doc) => {
-          write!(buf, "indent").unwrap();
+          write!(buf, "line-suffix").unwrap();
           write!(buf, "\n{}", "  ".repeat(ind + 1)).unwrap();
           rec(buf, ind + 1, &doc);
         }

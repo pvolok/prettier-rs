@@ -20,6 +20,28 @@ impl<N: Spanned> Spanned for Path<'_, N> {
   }
 }
 
+pub struct PathParentsIter<'a>(pub Option<PathSeg<'a>>);
+
+impl<'a> Iterator for PathParentsIter<'a> {
+  type Item = AstParentNodeRef<'a>;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    if let Some(seg) = self.0 {
+      let next = seg.node_ref;
+      self.0 = seg.parent.cloned();
+      Some(next)
+    } else {
+      None
+    }
+  }
+}
+
+impl<N> Path<'_, N> {
+  pub fn parents(&self) -> PathParentsIter {
+    PathParentsIter(Some(self.parent))
+  }
+}
+
 const INVALID_NODE: Invalid = Invalid {
   span: Span {
     lo: BytePos::DUMMY,
@@ -50,6 +72,19 @@ macro_rules! var {
   };
 }
 pub(crate) use var;
+
+macro_rules! sub {
+  ($var:ident, $type:ident, $field:ident, $Field:ident) => {
+    $var.sub(|p| {
+      use swc_ecma_visit::fields::*;
+      (
+        crate::ast_path::ARef::$type(p, <concat_idents!($type, Field)>::$Field),
+        &p.$field,
+      )
+    })
+  };
+}
+pub(crate) use sub;
 
 macro_rules! sub_box {
   ($var:ident, $type:ident, $field:ident, $Field:ident) => {

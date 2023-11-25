@@ -1,23 +1,23 @@
-use std::{ascii::AsciiExt, ops::Bound, rc::Rc};
+use std::rc::Rc;
 
 use swc_common::{
   comments::SingleThreadedComments, BytePos, SourceFile, SourceMap, Span,
   Spanned,
 };
 use swc_ecma_ast::{
-  AssignExpr, AwaitExpr, BigInt, BlockStmt, CallExpr, CatchClause,
-  ComputedPropName, Decl, DoWhileStmt, Expr, ExprOrSpread, ExprStmt, ForHead,
-  ForInStmt, ForOfStmt, ForStmt, Ident, IfStmt, Lit, MemberExpr, MemberProp,
-  Module, ModuleItem, NewExpr, Number, ObjectLit, ObjectPat, ObjectPatProp,
-  OptCall, OptChainBase, Pat, PatOrExpr, Program, Prop, PropName, PropOrSpread,
-  RestPat, SeqExpr, Stmt, Str, SuperProp, SuperPropExpr, SwitchCase,
-  SwitchStmt, TaggedTpl, Tpl, TryStmt, UnaryExpr, UpdateExpr, VarDecl,
-  VarDeclKind, VarDeclOrExpr, VarDeclarator, WhileStmt, YieldExpr,
+  AssignExpr, AwaitExpr, BigInt, BlockStmt, CatchClause, ComputedPropName,
+  Decl, DoWhileStmt, Expr, ExprStmt, ForHead, ForInStmt, ForOfStmt, ForStmt,
+  Ident, IfStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem, Number,
+  ObjectLit, ObjectPat, ObjectPatProp, OptChainBase, Pat, PatOrExpr, Program,
+  Prop, PropName, PropOrSpread, RestPat, SeqExpr, Stmt, Str, SuperProp,
+  SuperPropExpr, SwitchCase, SwitchStmt, TaggedTpl, Tpl, TryStmt, UnaryExpr,
+  UpdateExpr, VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator, WhileStmt,
+  YieldExpr,
 };
 use swc_ecma_visit::{
   fields::{
     AssignExprField, ExprField, ForStmtField, OptChainBaseField,
-    OptChainExprField, SeqExprField,
+    OptChainExprField, ParamField, SeqExprField,
   },
   AstParentKind, AstParentNodeRef,
 };
@@ -853,11 +853,18 @@ impl AstPrinter {
   }
 
   pub fn print_pat(&mut self, pat: &Pat) -> anyhow::Result<Doc> {
-    let doc = match pat {
+    self.print_pat_path(fake_path(pat))
+  }
+
+  pub fn print_pat_path(&mut self, pat: Path<Pat>) -> anyhow::Result<Doc> {
+    let doc = match pat.node {
       Pat::Ident(ident) => self.print_ident(ident),
       Pat::Array(array_pat) => print_array_pat(self, array_pat)?,
       Pat::Rest(rest_pat) => self.print_rest_pat(rest_pat)?,
-      Pat::Object(object_pat) => self.print_object_pat(object_pat)?,
+      Pat::Object(object_pat) => {
+        let object_pat = var!(pat, Pat, object_pat, Object);
+        self.print_object_pat(object_pat)?
+      }
       Pat::Assign(assign_pat) => Doc::new_concat(vec![
         self.print_pat(&assign_pat.left)?,
         " = ".into(),
@@ -998,6 +1005,10 @@ impl AstPrinter {
     &mut self,
     object_lit: &ObjectLit,
   ) -> anyhow::Result<Doc> {
+    let should_break = object_lit.props.first().map_or(false, |first| {
+      self.line_no(object_lit.span_lo()) != self.line_no(first.span_lo())
+    });
+
     let separator = Doc::from(",");
 
     let mut is_prev_line_empty = false;
@@ -1072,18 +1083,33 @@ impl AstPrinter {
       ]
     };
 
-    Ok(Doc::new_concat(parts))
+    Ok(Doc::new_group(
+      Doc::new_concat(parts),
+      should_break,
+      None,
+      None,
+    ))
   }
 
   fn print_object_pat(
     &mut self,
-    object_pat: &ObjectPat,
+    object_pat: Path<ObjectPat>,
   ) -> anyhow::Result<Doc> {
+    let should_break = match object_pat.parent.node_ref {
+      AstParentNodeRef::Param(_, ParamField::Pat) => false,
+      _ => object_pat.node.props.iter().any(|prop| {
+        prop
+          .as_key_value()
+          .map_or(false, |kv| kv.value.is_object() || kv.value.is_array())
+      }),
+    };
+
     let separator = Doc::from(",");
 
     let mut is_prev_line_empty = false;
 
     let props = object_pat
+      .node
       .props
       .iter()
       .enumerate()
@@ -1148,7 +1174,7 @@ impl AstPrinter {
         prop_parts.push(Doc::new_group(prop_doc, false, None, None));
 
         is_prev_line_empty =
-          self.is_next_line_empty(object_pat.props.iter(), i);
+          self.is_next_line_empty(object_pat.node.props.iter(), i);
 
         Ok(Doc::new_concat(prop_parts))
       })
@@ -1168,7 +1194,17 @@ impl AstPrinter {
       ]
     };
 
-    Ok(Doc::new_concat(parts))
+    // TODO:
+    // If we inline the object as first argument of the parent, we don't want
+    // to create another group so that the object breaks before the return
+    // type
+
+    Ok(Doc::new_group(
+      Doc::new_concat(parts),
+      should_break,
+      None,
+      None,
+    ))
   }
 
   fn print_unary_expr(
@@ -1401,7 +1437,7 @@ impl AstPrinter {
   pub fn print_lit(&mut self, lit: &Lit) -> anyhow::Result<Doc> {
     let doc = match lit {
       Lit::Str(str) => self.print_str(str),
-      Lit::Bool(bool) => Doc::new_text(format!("{:?}", bool)),
+      Lit::Bool(bool) => Doc::new_text(format!("{}", bool.value)),
       Lit::Null(_) => Doc::new_text(format!("null")),
       Lit::Num(num) => self.print_number(num),
       Lit::BigInt(big_int) => self.print_big_int(big_int),
