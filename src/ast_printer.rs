@@ -32,7 +32,10 @@ use crate::{
     bin_expr::print_bin_expr,
     call::{print_call_expr, print_new_expr, print_opt_call},
     class::{print_class_decl, print_class_expr},
-    comments::{print_dangling_comments, Cmts},
+    comments::{
+      print_dangling_comments, print_leading_comments, print_trailing_comments,
+      Cmts,
+    },
     function::{
       print_arrow_expr, print_fn_decl, print_fn_expr, print_return_stmt,
       print_throw_stmt,
@@ -149,9 +152,18 @@ impl AstPrinter {
   ) -> anyhow::Result<Doc> {
     let mut contents = Vec::new();
 
+    let mut cmts_start = self.src_file.start_pos;
+
     let body = module.body();
     let body_len = body.len();
     for (i, module_item) in body.iter().enumerate() {
+      contents.push(print_leading_comments(
+        self,
+        cmts_start,
+        module_item.span_lo(),
+      ));
+      cmts_start = module_item.span_hi();
+
       let item = self.print_module_item(module_item.clone())?;
       contents.push(item);
 
@@ -163,6 +175,12 @@ impl AstPrinter {
         }
       }
     }
+
+    contents.push(print_trailing_comments(
+      self,
+      cmts_start,
+      self.src_file.end_pos,
+    ));
 
     contents.push(Doc::hardline());
 
