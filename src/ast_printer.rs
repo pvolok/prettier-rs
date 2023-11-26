@@ -23,7 +23,7 @@ use swc_ecma_visit::{
 };
 
 use crate::{
-  ast_path::{fake_path, sub_box, var, ARef, Path},
+  ast_path::{fake_path, sub, sub_box, var, ARef, Path},
   doc::{Doc, GroupId, RDoc},
   doc_printer::{print_doc, string_width, DocWriter},
   print_js::{
@@ -646,6 +646,7 @@ impl AstPrinter {
     &mut self,
     for_of_stmt: &ForOfStmt,
   ) -> anyhow::Result<Doc> {
+    let for_of_stmt_path = fake_path(for_of_stmt);
     let body_doc = match for_of_stmt.body.as_ref() {
       Stmt::Block(_) => {
         Doc::new_concat(vec![" ".into(), self.print_stmt(&for_of_stmt.body)?])
@@ -659,10 +660,13 @@ impl AstPrinter {
 
     let maybe_await = if for_of_stmt.is_await { " await" } else { "" }.into();
 
-    let left_doc = match &for_of_stmt.left {
+    let left_path = sub!(for_of_stmt_path, ForOfStmt, left, Left);
+    let left_doc = match left_path.node {
       ForHead::VarDecl(var_decl) => self.print_var_decl(var_decl, true),
       ForHead::UsingDecl(using_decl) => todo!(),
-      ForHead::Pat(pat) => self.print_pat(pat),
+      ForHead::Pat(pat) => {
+        self.print_pat_path(var!(left_path, ForHead, pat.as_ref(), Pat))
+      }
     }?;
 
     let doc = Doc::new_group(
@@ -877,7 +881,9 @@ impl AstPrinter {
         self.print_expr(&assign_pat.right)?,
       ]),
       Pat::Invalid(_) => todo!(),
-      Pat::Expr(expr) => self.print_expr(&expr)?,
+      Pat::Expr(expr) => {
+        self.print_expr_path(var!(pat, Pat, expr.as_ref(), Expr))?
+      }
     };
 
     Ok(doc)
@@ -918,7 +924,7 @@ impl AstPrinter {
       }
       Expr::Assign(assign_expr) => self.print_assign_expr(assign_expr)?,
       Expr::Member(member_expr) => {
-        self.print_member_expr(fake_path(member_expr), false)?
+        self.print_member_expr(var!(expr, Expr, member_expr, Member), false)?
       }
       Expr::SuperProp(super_prop_expr) => {
         self.print_super_prop_expr(fake_path(super_prop_expr), false)?
@@ -1325,7 +1331,8 @@ impl AstPrinter {
     member_expr: Path<MemberExpr>,
     optional: bool,
   ) -> anyhow::Result<Doc> {
-    let obj = self.print_expr(&member_expr.node.obj)?;
+    let obj =
+      self.print_expr_path(sub_box!(member_expr, MemberExpr, obj, Obj))?;
 
     let lookup = match &member_expr.node.prop {
       MemberProp::Ident(ident) => {

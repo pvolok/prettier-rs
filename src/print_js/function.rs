@@ -1,15 +1,10 @@
-use std::ops::Range;
-
-use swc_common::{BytePos, Span, Spanned};
+use swc_common::{BytePos, Spanned};
 use swc_ecma_ast::{
-  ArrowExpr, BlockStmtOrExpr, Expr, FnDecl, FnExpr, Function, Ident, Param,
+  ArrowExpr, BlockStmtOrExpr, Expr, FnDecl, FnExpr, Function, Param,
   ReturnStmt, ThrowStmt,
 };
 use swc_ecma_visit::{
-  fields::{
-    ArrowExprField, BlockStmtOrExprField, CallExprField, ExprField,
-    NewExprField, ReturnStmtField, ThrowStmtField,
-  },
+  fields::{CallExprField, NewExprField, ReturnStmtField, ThrowStmtField},
   AstParentKind,
 };
 
@@ -350,7 +345,18 @@ fn print_function(
   function: &Function,
   ident: Option<Doc>,
 ) -> anyhow::Result<Doc> {
-  let mut parts = vec!["function ".into()];
+  let mut parts = vec![];
+
+  if function.is_async {
+    parts.push("async ".into());
+  }
+
+  if function.is_generator {
+    parts.push("function* ".into());
+  } else {
+    parts.push("function ".into());
+  }
+
   if let Some(ident) = ident {
     parts.push(ident);
   }

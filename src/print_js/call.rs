@@ -4,7 +4,7 @@ use swc_ecma_ast::{
 };
 
 use crate::{
-  ast_path::fake_path,
+  ast_path::{fake_path, sub, sub_box, var, Path},
   ast_printer::{AstPrinter, SrcItem},
   doc::Doc,
 };
@@ -19,10 +19,22 @@ pub fn print_call_expr(
   cx: &mut AstPrinter,
   call_expr: &CallExpr,
 ) -> anyhow::Result<Doc> {
-  let callee_doc = match &call_expr.callee {
-    swc_ecma_ast::Callee::Super(_) => "super".into(),
-    swc_ecma_ast::Callee::Import(_) => "import".into(),
-    swc_ecma_ast::Callee::Expr(expr) => cx.print_expr(expr)?,
+  print_call_expr_path(cx, fake_path(call_expr))
+}
+
+pub fn print_call_expr_path(
+  cx: &mut AstPrinter,
+  call_expr_path: Path<CallExpr>,
+) -> anyhow::Result<Doc> {
+  let call_expr = call_expr_path.node;
+
+  let callee = sub!(call_expr_path, CallExpr, callee, Callee);
+  let callee_doc = match callee.node {
+    Callee::Super(_) => "super".into(),
+    Callee::Import(_) => "import".into(),
+    Callee::Expr(expr) => {
+      cx.print_expr_path(var!(callee, Callee, expr.as_ref(), Expr))?
+    }
   };
 
   // TODO
@@ -236,7 +248,9 @@ pub fn print_new_expr(
   cx: &mut AstPrinter,
   new_expr: &NewExpr,
 ) -> anyhow::Result<Doc> {
-  let callee_doc = cx.print_expr(&new_expr.callee)?;
+  let new_expr_path = fake_path(new_expr);
+  let callee = sub_box!(new_expr_path, NewExpr, callee, Callee);
+  let callee_doc = cx.print_expr_path(callee)?;
 
   let args_start = skip_to_open_paren(cx, new_expr.callee.span_hi());
   let args_end = new_expr.span_hi();
