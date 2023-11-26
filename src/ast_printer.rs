@@ -46,6 +46,7 @@ use crate::{
     statement::print_stmt_seq,
     ternary::print_cond,
   },
+  src_cursor::SrcCursor,
 };
 
 pub struct AstPrinter {
@@ -754,11 +755,16 @@ impl AstPrinter {
     let left_doc = self.print_pat(&var_declarator.name)?;
 
     if let Some(init) = var_declarator.init.as_ref() {
+      let op_pos = self
+        .cursor(var_declarator.name.span_hi())
+        .skip_while(char::is_whitespace)
+        .pos;
+
       return print_assignment(
         self,
         left_doc,
         AssignmentLeft::Pat(&var_declarator.name),
-        " =".into(),
+        (" =".into(), op_pos),
         init,
       );
     } else {
@@ -889,20 +895,6 @@ impl AstPrinter {
 
     parts.push(self.print_expr(&expr_stmt.expr)?);
     parts.push(";".into());
-
-    if self
-      .comments
-      .with_trailing(expr_stmt.span_hi(), |comments| !comments.is_empty())
-    {
-      parts.push(" ".into());
-      self.comments.with_trailing(
-        expr_stmt.span_hi(),
-        |comments| -> anyhow::Result<()> {
-          parts.push(print_dangling_comments(comments)?);
-          Ok(())
-        },
-      )?;
-    }
 
     Ok(Doc::new_concat(parts))
   }
@@ -1264,12 +1256,16 @@ impl AstPrinter {
 
     let op_doc =
       Doc::new_concat(vec![" ".into(), assign_expr.op.as_str().into()]);
+    let op_pos = self
+      .cursor(assign_expr.left.span_hi())
+      .skip_while(char::is_whitespace)
+      .pos;
 
     return print_assignment(
       self,
       left_doc,
       AssignmentLeft::PatOrExpr(&assign_expr.left),
-      op_doc,
+      (op_doc, op_pos),
       &assign_expr.right,
     );
 
@@ -1462,7 +1458,7 @@ impl AstPrinter {
 
   pub fn print_number(&mut self, number: &Number) -> Doc {
     let raw = number.raw.as_ref().unwrap();
-    Doc::new_text(format!("{}", raw))
+    Doc::new_text(format!("{}", raw.to_ascii_lowercase()))
   }
 
   pub fn print_big_int(&mut self, big_int: &BigInt) -> Doc {
@@ -1610,6 +1606,14 @@ impl AstPrinter {
 
   pub fn idx_to_pos(&self, index: usize) -> BytePos {
     BytePos(self.src_file.start_pos.0 + index as u32)
+  }
+
+  pub fn cursor(&self, pos: BytePos) -> SrcCursor {
+    SrcCursor {
+      src: &self.src_file,
+      cmts: &self.cmts,
+      pos,
+    }
   }
 }
 

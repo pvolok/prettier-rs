@@ -225,11 +225,15 @@ pub fn print_class_prop(cx: &mut AstPrinter, class_prop: &ClassProp) -> RDoc {
   let left_doc = Doc::new_concat(parts);
 
   if let Some(value) = class_prop.value.as_ref() {
+    let op_pos = cx
+      .cursor(class_prop.key.span_hi())
+      .skip_while(char::is_whitespace)
+      .pos;
     let doc = print_assignment(
       cx,
       left_doc,
       super::assign::AssignmentLeft::PropName(&class_prop.key),
-      " =".into(),
+      (" =".into(), op_pos),
       &value,
     )?;
     Ok(Doc::new_concat(vec![doc, semi]))

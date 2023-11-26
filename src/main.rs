@@ -1,6 +1,7 @@
 #![feature(btree_cursors)]
 #![feature(concat_idents)]
 #![feature(iter_intersperse)]
+#![feature(pattern)]
 #![feature(slice_take)]
 
 use std::{io::Read, path::PathBuf};
@@ -20,6 +21,7 @@ mod ast_util;
 mod doc;
 mod doc_printer;
 mod print_js;
+mod src_cursor;
 
 fn main() {
   let es_config = EsConfig {

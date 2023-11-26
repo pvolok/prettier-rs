@@ -1,3 +1,4 @@
+use swc_common::{BytePos, Spanned};
 use swc_ecma_ast::{
   BlockStmtOrExpr, Callee, Expr, Lit, ObjectPatProp, Pat, PatOrExpr, PropName,
   PropOrSpread,
@@ -13,6 +14,7 @@ use crate::{
 
 use super::{
   bin_expr::should_inline_bin_expr,
+  comments::print_trailing_comments,
   function::{print_arrow_expr, ArrowArgs},
 };
 
@@ -21,6 +23,17 @@ pub enum AssignmentLeft<'a> {
   PatOrExpr(&'a PatOrExpr),
   PropOrSpread(&'a PropOrSpread),
   PropName(&'a PropName),
+}
+
+impl Spanned for AssignmentLeft<'_> {
+  fn span(&self) -> swc_common::Span {
+    match self {
+      AssignmentLeft::Pat(pat) => pat.span(),
+      AssignmentLeft::PatOrExpr(pat_or_expr) => pat_or_expr.span(),
+      AssignmentLeft::PropOrSpread(prop_or_spread) => prop_or_spread.span(),
+      AssignmentLeft::PropName(prop_name) => prop_name.span(),
+    }
+  }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,9 +51,14 @@ pub fn print_assignment(
   cx: &mut AstPrinter,
   left_doc: Doc,
   left: AssignmentLeft,
-  op_doc: Doc,
+  (op_doc, op_pos): (Doc, BytePos),
   right: &Expr,
 ) -> anyhow::Result<Doc> {
+  let left_doc = Doc::new_concat(vec![
+    left_doc,
+    print_trailing_comments(cx, left.span_hi(), op_pos),
+  ]);
+
   let layout = choose_layout(cx, &left_doc, left, right);
 
   // dbg

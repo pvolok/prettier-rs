@@ -1,11 +1,17 @@
+use swc_common::{BytePos, Span, Spanned};
 use swc_ecma_ast::{
   BlockStmtOrExpr, CallExpr, Callee, Expr, ExprOrSpread, Lit, NewExpr, OptCall,
 };
 
-use crate::{ast_path::fake_path, ast_printer::AstPrinter, doc::Doc};
+use crate::{
+  ast_path::fake_path,
+  ast_printer::{AstPrinter, SrcItem},
+  doc::Doc,
+};
 
 use super::{
   array::is_consicely_printed_array,
+  comments::print_dangling_comments,
   function::{print_arrow_expr, ArrowArgs},
 };
 
@@ -49,7 +55,9 @@ pub fn print_call_expr(
     ]));
   }
 
-  let args = print_call_expr_args(cx, &call_expr.args)?;
+  let args_start = skip_to_open_paren(cx, call_expr.callee.span_hi());
+  let args_end = call_expr.span_hi();
+  let args = print_call_expr_args(cx, (args_start, args_end), &call_expr.args)?;
 
   let doc = Doc::new_concat(vec![callee_doc, args]);
 
@@ -62,7 +70,9 @@ pub fn print_opt_call(
 ) -> anyhow::Result<Doc> {
   let callee_doc = cx.print_expr(&opt_call.callee)?;
 
-  let args = print_call_expr_args(cx, &opt_call.args)?;
+  let args_start = skip_to_open_paren(cx, opt_call.callee.span_hi());
+  let args_end = opt_call.span_hi();
+  let args = print_call_expr_args(cx, (args_start, args_end), &opt_call.args)?;
 
   let doc = Doc::new_concat(vec![callee_doc, "?.".into(), args]);
 
@@ -71,8 +81,17 @@ pub fn print_opt_call(
 
 fn print_call_expr_args(
   cx: &mut AstPrinter,
+  (start, end): (BytePos, BytePos),
   args: &[ExprOrSpread],
 ) -> anyhow::Result<Doc> {
+  if args.is_empty() {
+    return Ok(Doc::new_concat(vec![
+      "(".into(),
+      print_dangling_comments(cx, start, end)?,
+      ")".into(),
+    ]));
+  }
+
   let mut any_arg_empty_line = false;
   let args_len = args.len();
 
@@ -196,16 +215,35 @@ fn print_call_expr_args(
   Ok(doc)
 }
 
+fn skip_to_open_paren(cx: &AstPrinter, pos: BytePos) -> BytePos {
+  cx.iter_ascii_chars(pos)
+    .skip_while(|item| match item {
+      SrcItem::Ascii(c, _) if c.is_whitespace() => true,
+      SrcItem::Comment(_) => true,
+      _ => false,
+    })
+    .next()
+    .map(|item| match item {
+      SrcItem::Ascii(_, pos) => Some(pos),
+      SrcItem::NonAscii => None,
+      SrcItem::Comment(_) => None,
+    })
+    .flatten()
+    .unwrap_or(pos)
+}
+
 pub fn print_new_expr(
   cx: &mut AstPrinter,
   new_expr: &NewExpr,
 ) -> anyhow::Result<Doc> {
   let callee_doc = cx.print_expr(&new_expr.callee)?;
 
+  let args_start = skip_to_open_paren(cx, new_expr.callee.span_hi());
+  let args_end = new_expr.span_hi();
   let args = if let Some(args) = &new_expr.args {
-    print_call_expr_args(cx, args)?
+    print_call_expr_args(cx, (args_start, args_end), args)?
   } else {
-    print_call_expr_args(cx, &[])?
+    print_call_expr_args(cx, (args_start, args_end), &[])?
   };
 
   let doc = Doc::new_concat(vec!["new ".into(), callee_doc, args]);

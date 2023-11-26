@@ -150,13 +150,18 @@ pub fn print_trailing_comments(
   Doc::new_concat(parts)
 }
 
-pub fn print_dangling_comments(comments: &[Comment]) -> anyhow::Result<Doc> {
+pub fn print_dangling_comments(
+  cx: &mut AstPrinter,
+  start: BytePos,
+  end: BytePos,
+) -> anyhow::Result<Doc> {
   let mut parts = Vec::new();
 
-  for comment in comments {
-    parts.push("//".into());
-    parts.push(comment.text.as_str().into());
-    parts.push(Doc::hardline());
+  for (i, cmt) in cx.cmts.by_lo.range(start..end).map(|(k, v)| v).enumerate() {
+    if i > 0 {
+      parts.push(Doc::hardline());
+    }
+    parts.push(print_comment(cmt));
   }
 
   Ok(Doc::new_concat(parts))
