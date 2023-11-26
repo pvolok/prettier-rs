@@ -139,6 +139,7 @@ pub fn clean_ast<N: FoldWith<AstCleaner>>(node: N) -> N {
   node.fold_with(&mut AstCleaner)
 }
 
+#[derive(Clone, Copy)]
 pub enum Quote {
   Single,
   Double,
@@ -156,6 +157,13 @@ impl Quote {
     match self {
       Quote::Single => "'",
       Quote::Double => "\"",
+    }
+  }
+
+  pub fn other(self) -> Self {
+    match self {
+      Quote::Single => Quote::Double,
+      Quote::Double => Quote::Single,
     }
   }
 }

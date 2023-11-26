@@ -268,7 +268,7 @@ impl Doc {
       Doc::LineSuffixBoundary => todo!(),
       Doc::BreakParent => true,
       Doc::Trim => false,
-      Doc::Line { hard, .. } => true,
+      Doc::Line { hard, .. } => *hard,
       Doc::Cursor => false,
       Doc::Label(_, doc) => doc.will_break(),
       Doc::Text(_) => false,

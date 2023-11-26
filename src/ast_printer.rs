@@ -25,6 +25,7 @@ use swc_ecma_visit::{
 
 use crate::{
   ast_path::{fake_path, sub, sub_box, var, ARef, Path},
+  ast_util::get_preferred_quote,
   doc::{Doc, GroupId, RDoc},
   doc_printer::{print_doc, string_width, DocWriter},
   print_js::{
@@ -318,6 +319,7 @@ impl AstPrinter {
         .collect::<Vec<_>>()
         .as_slice()
       {
+        [_, ARef::ForStmt(_, _)] => (),
         [_, ARef::WhileStmt(_, WhileStmtField::Body)] => (),
         [_, ARef::DoWhileStmt(_, DoWhileStmtField::Body)] => (),
         _ => {
@@ -574,14 +576,16 @@ impl AstPrinter {
 
   fn print_for_stmt(&mut self, for_stmt: &ForStmt) -> anyhow::Result<Doc> {
     self.push(AstParentKind::ForStmt(ForStmtField::Body));
+    let for_stmt_path = fake_path(for_stmt);
+    let body_path = sub_box!(for_stmt_path, ForStmt, body, Body);
     let body_doc = match for_stmt.body.as_ref() {
       Stmt::Block(_) => {
-        Doc::new_concat(vec![" ".into(), self.print_stmt(&for_stmt.body)?])
+        Doc::new_concat(vec![" ".into(), self.print_stmt_path(body_path)?])
       }
       Stmt::Empty(_) => ";".into(),
       _ => Doc::new_indent(Doc::new_concat(vec![
         Doc::line(),
-        self.print_stmt(&for_stmt.body)?,
+        self.print_stmt_path(body_path)?,
       ])),
     };
     self.pop();
@@ -762,6 +766,12 @@ impl AstPrinter {
     if let Some((first, rest)) = decls.split_first() {
       let has_value = var_decl.decls.iter().any(|decl| decl.init.is_some());
 
+      let first = if decls.len() == 1 {
+        first.clone()
+      } else {
+        Doc::new_indent(first.clone())
+      };
+
       parts.push(" ".into());
       parts.push(first.clone());
 
@@ -771,7 +781,7 @@ impl AstPrinter {
           .map(|decl| {
             Doc::new_concat(vec![
               ",".into(),
-              if has_value {
+              if has_value && !in_for {
                 Doc::hardline()
               } else {
                 Doc::line()
@@ -1064,10 +1074,10 @@ impl AstPrinter {
             Prop::KeyValue(key_value_prop) => {
               let key: Doc = match &key_value_prop.key {
                 PropName::Ident(ident) => ident.sym.as_str().into(),
-                PropName::Str(_) => todo!(),
-                PropName::Num(_) => todo!(),
+                PropName::Str(str) => self.print_str(str),
+                PropName::Num(number) => self.print_number(number),
                 PropName::Computed(_) => todo!(),
-                PropName::BigInt(_) => todo!(),
+                PropName::BigInt(big_int) => self.print_big_int(big_int),
               };
               let value = self.print_expr(&key_value_prop.value)?;
 
