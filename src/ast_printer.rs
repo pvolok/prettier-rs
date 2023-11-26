@@ -16,8 +16,9 @@ use swc_ecma_ast::{
 };
 use swc_ecma_visit::{
   fields::{
-    AssignExprField, ExprField, ForStmtField, OptChainBaseField,
-    OptChainExprField, ParamField, SeqExprField,
+    AssignExprField, DoWhileStmtField, ExprField, ForStmtField,
+    OptChainBaseField, OptChainExprField, ParamField, SeqExprField,
+    WhileStmtField,
   },
   AstParentKind, AstParentNodeRef,
 };
@@ -211,10 +212,16 @@ impl AstPrinter {
   }
 
   pub fn print_stmt(&mut self, stmt: &Stmt) -> anyhow::Result<Doc> {
+    self.print_stmt_path(fake_path(stmt))
+  }
+
+  pub fn print_stmt_path(&mut self, stmt: Path<Stmt>) -> anyhow::Result<Doc> {
     let semi = if self.semi { ";" } else { "" }.into();
 
-    let doc = match stmt {
-      Stmt::Block(block_stmt) => self.print_block_stmt(block_stmt, true),
+    let doc = match stmt.node {
+      Stmt::Block(block_stmt) => {
+        self.print_block_stmt_path(var!(stmt, Stmt, block_stmt, Block), true)
+      }
       Stmt::Empty(_) => Ok("".into()),
       Stmt::Debugger(_) => Ok(Doc::new_concat(vec!["debugger".into(), semi])),
       Stmt::With(with_stmt) => {
@@ -285,6 +292,15 @@ impl AstPrinter {
     block_stmt: &BlockStmt,
     empty_hardline: bool,
   ) -> anyhow::Result<Doc> {
+    self.print_block_stmt_path(fake_path(block_stmt), empty_hardline)
+  }
+
+  pub fn print_block_stmt_path(
+    &mut self,
+    block_stmt_path: Path<BlockStmt>,
+    empty_hardline: bool,
+  ) -> anyhow::Result<Doc> {
+    let block_stmt = block_stmt_path.node;
     let mut parts = Vec::new();
 
     parts.push("{".into());
@@ -296,7 +312,20 @@ impl AstPrinter {
       )));
       parts.push(Doc::hardline());
     } else if empty_hardline {
-      parts.push(Doc::hardline());
+      match block_stmt_path
+        .parents()
+        .take(2)
+        .collect::<Vec<_>>()
+        .as_slice()
+      {
+        [_, ARef::WhileStmt(_, WhileStmtField::Body)] => (),
+        [_, ARef::DoWhileStmt(_, DoWhileStmtField::Body)] => (),
+        _ => {
+          if empty_hardline {
+            parts.push(Doc::hardline());
+          }
+        }
+      }
     }
 
     parts.push("}".into());
@@ -488,8 +517,11 @@ impl AstPrinter {
     &mut self,
     while_stmt: &WhileStmt,
   ) -> anyhow::Result<Doc> {
-    let body_doc = self.print_stmt(&while_stmt.body)?;
-    Ok(Doc::new_concat(vec![
+    let while_stmt_path = fake_path(while_stmt);
+
+    let body_doc =
+      self.print_stmt_path(sub_box!(while_stmt_path, WhileStmt, body, Body))?;
+    Ok(Doc::group(Doc::new_concat(vec![
       "while (".into(),
       Doc::group(Doc::new_concat(vec![
         Doc::new_indent(Doc::new_concat(vec![
@@ -500,14 +532,21 @@ impl AstPrinter {
       ])),
       ")".into(),
       self.adjust_clause(while_stmt.body.as_ref(), body_doc, false),
-    ]))
+    ])))
   }
 
   fn print_do_while_stmt(
     &mut self,
     do_while_stmt: &DoWhileStmt,
   ) -> anyhow::Result<Doc> {
-    let body_doc = self.print_stmt(&do_while_stmt.body)?;
+    let do_while_stmt_path = fake_path(do_while_stmt);
+
+    let body_doc = self.print_stmt_path(sub_box!(
+      do_while_stmt_path,
+      DoWhileStmt,
+      body,
+      Body
+    ))?;
     let clause = self.adjust_clause(&do_while_stmt.body, body_doc, false);
     let do_body = Doc::group(Doc::new_concat(vec!["do".into(), clause]));
     let mut parts = vec![do_body];

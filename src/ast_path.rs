@@ -40,6 +40,14 @@ impl<N> Path<'_, N> {
   pub fn parents(&self) -> PathParentsIter {
     PathParentsIter(Some(self.parent))
   }
+
+  pub fn debug(&self) -> String {
+    self
+      .parents()
+      .map(|p| format!("{:?}", p.kind()))
+      .intersperse(format!(" -> "))
+      .collect()
+  }
 }
 
 const INVALID_NODE: Invalid = Invalid {

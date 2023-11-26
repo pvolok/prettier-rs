@@ -59,9 +59,16 @@ pub fn print_bin_expr_inner(
   ]);
 
   let should_break = false;
-  let should_group = true;
 
-  parts.push(if line_before_operator { "" } else { " " }.into());
+  let is_logical = match bin_expr.node.op {
+    BinaryOp::LogicalOr | BinaryOp::LogicalAnd => true,
+    _ => false,
+  };
+  let should_group = should_break && !is_logical && false;
+
+  if !line_before_operator {
+    parts.push(" ".into());
+  }
   parts.push(if should_group {
     Doc::new_group(right, should_break, None, None)
   } else {
