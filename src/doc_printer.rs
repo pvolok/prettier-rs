@@ -17,12 +17,12 @@ impl<'a> Write for DocWriter<'a> {
 }
 
 impl DocWriter<'_> {
-  fn trim(&mut self) -> usize {
+  fn trim(&mut self) -> i32 {
     match self {
       DocWriter::String(s) => {
-        let len = s.trim_end_matches("\t ").len();
-        s.truncate(s.len() - len);
-        len
+        let len = s.trim_end_matches(['\t', ' ']).len();
+        s.truncate(len);
+        len as i32
       }
     }
   }
@@ -466,6 +466,7 @@ pub fn print_doc(
             } else if literal {
               todo!();
             } else {
+              out.trim();
               write!(out, "\n{}", ind)?;
               pos = ind.width();
             }

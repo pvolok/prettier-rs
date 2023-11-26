@@ -92,7 +92,7 @@ pub fn print_trailing_comments(
   let mut prev_is_block = false;
   let mut prev_has_line_suffix = false;
 
-  for cmt in cx.cmts.by_lo.range(start..end).map(|(k, v)| v) {
+  for cmt in cx.cmts.by_lo.range(start..end.max(start)).map(|(k, v)| v) {
     let cmt_doc = print_comment(cmt);
 
     let preceding_newline_pos = cx

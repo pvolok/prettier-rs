@@ -7,12 +7,12 @@ use swc_common::{
 use swc_ecma_ast::{
   AssignExpr, AwaitExpr, BigInt, BlockStmt, CatchClause, ComputedPropName,
   Decl, DoWhileStmt, Expr, ExprStmt, ForHead, ForInStmt, ForOfStmt, ForStmt,
-  Ident, IfStmt, Lit, MemberExpr, MemberProp, Module, ModuleItem, Number,
-  ObjectLit, ObjectPat, ObjectPatProp, OptChainBase, Pat, PatOrExpr, Program,
-  Prop, PropName, PropOrSpread, RestPat, SeqExpr, Stmt, Str, SuperProp,
-  SuperPropExpr, SwitchCase, SwitchStmt, TaggedTpl, Tpl, TryStmt, UnaryExpr,
-  UpdateExpr, VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator, WhileStmt,
-  YieldExpr,
+  Ident, IfStmt, Lit, MemberExpr, MemberProp, MetaPropKind, Module, ModuleItem,
+  Number, ObjectLit, ObjectPat, ObjectPatProp, OptChainBase, Pat, PatOrExpr,
+  Program, Prop, PropName, PropOrSpread, RestPat, SeqExpr, Stmt, Str,
+  SuperProp, SuperPropExpr, SwitchCase, SwitchStmt, TaggedTpl, Tpl, TryStmt,
+  UnaryExpr, UpdateExpr, VarDecl, VarDeclKind, VarDeclOrExpr, VarDeclarator,
+  WhileStmt, YieldExpr,
 };
 use swc_ecma_visit::{
   fields::{
@@ -995,7 +995,10 @@ impl AstPrinter {
       )?,
       Expr::Class(class_expr) => print_class_expr(self, class_expr)?,
       Expr::Yield(yield_expr) => self.print_yield_expr(yield_expr)?,
-      Expr::MetaProp(_) => todo!(),
+      Expr::MetaProp(meta_prop_expr) => match meta_prop_expr.kind {
+        MetaPropKind::NewTarget => "new.target".into(),
+        MetaPropKind::ImportMeta => "import.meta".into(),
+      },
       Expr::Await(await_expr) => self.print_await_expr(await_expr)?,
       Expr::Paren(paren_expr) => self.print_expr(&paren_expr.expr)?,
       Expr::JSXMember(_) => todo!(),
@@ -1009,7 +1012,9 @@ impl AstPrinter {
       Expr::TsAs(_) => todo!("ts"),
       Expr::TsInstantiation(_) => todo!("ts"),
       Expr::TsSatisfies(_) => todo!("ts"),
-      Expr::PrivateName(_) => todo!(),
+      Expr::PrivateName(private_name) => {
+        Doc::new_concat(vec!["#".into(), self.print_ident(&private_name.id)])
+      }
       Expr::OptChain(opt_chain_expr) => {
         let opt_chain_expr = fake_path(opt_chain_expr);
         let base = opt_chain_expr.sub(|p| {
@@ -1081,10 +1086,20 @@ impl AstPrinter {
               };
               let value = self.print_expr(&key_value_prop.value)?;
 
+              let op_pos = self
+                .cursor(key_value_prop.key.span_hi())
+                .skip_while(char::is_whitespace)
+                .pos;
+
               let group_id = self.group_id("assigment");
               Doc::new_group(
                 Doc::new_concat(vec![
                   key,
+                  print_trailing_comments(
+                    self,
+                    key_value_prop.key.span_hi(),
+                    op_pos,
+                  ),
                   ":".into(),
                   Doc::new_group(Doc::line(), false, None, Some(group_id)),
                   Doc::new_indent_if_break(value, Some(group_id), false),
@@ -1209,7 +1224,10 @@ impl AstPrinter {
               key
             }
           }
-          ObjectPatProp::Rest(_) => todo!(),
+          ObjectPatProp::Rest(rest_pat) => Doc::new_concat(vec![
+            "...".into(),
+            self.print_pat(rest_pat.arg.as_ref())?,
+          ]),
         };
 
         let mut prop_parts = Vec::new();

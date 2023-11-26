@@ -72,8 +72,13 @@ pub fn print_class_decl_or_expr(
 pub fn print_class(cx: &mut AstPrinter, class: &Class) -> anyhow::Result<Doc> {
   let mut parts = Vec::new();
 
-  for (i, class_member) in class.body.iter().enumerate() {
-    let is_last = i == class.body.len() - 1;
+  let clean_body = class
+    .body
+    .iter()
+    .filter(|class_member| !class_member.is_empty())
+    .collect::<Vec<_>>();
+  for (i, class_member) in clean_body.iter().enumerate() {
+    let is_last = i == clean_body.len() - 1;
 
     let doc = print_class_member(cx, class_member)?;
     parts.push(doc);
